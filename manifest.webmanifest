@@ -1,0 +1,20 @@
+{
+  "name": "Bütçe Planlayıcı",
+  "short_name": "Bütçe",
+  "description": "Bütçe Planlayıcı'nın telefon sürümü: simülasyon, yatırım kayıtları ve varlıklar. Veriler yalnızca bu cihazda durur.",
+  "lang": "tr",
+  "dir": "ltr",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f9f9f7",
+  "theme_color": "#f9f9f7",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "simge/simge-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "simge/simge-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "simge/simge-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
