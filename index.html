@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Bütçe Planlayıcı'nın telefon sürümü: simülasyon, yatırım kayıtları ve varlıklar. Veriler yalnızca bu cihazda durur.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Bütçe">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>Bütçe Planlayıcı</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="simge/simge-192.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="simge/apple-touch-icon.png">
+  <link rel="stylesheet" href="stil.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <header class="ust">
+    <h1 id="baslik">Bütçe Planlayıcı</h1>
+    <button id="rozet" class="rozet gizli" data-is="ekran" data-ekran="veri" type="button"></button>
+  </header>
+
+  <main id="icerik" aria-live="polite">
+    <noscript>
+      <div class="kart"><h2>JavaScript kapalı</h2><p>Bu uygulama tarayıcıda JavaScript açıkken çalışır.</p></div>
+    </noscript>
+  </main>
+
+  <nav class="alt" aria-label="Ekranlar">
+    <button type="button" data-is="ekran" data-ekran="ozet" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg>
+      <span>Özet</span>
+    </button>
+    <button type="button" data-is="ekran" data-ekran="sim">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-7"/></svg>
+      <span>Simülasyon</span>
+    </button>
+    <button type="button" data-is="ekran" data-ekran="yatirim">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+      <span>Yatırımlar</span>
+    </button>
+    <button type="button" data-is="ekran" data-ekran="varlik">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><path d="M3 13h18"/></svg>
+      <span>Varlıklar</span>
+    </button>
+    <button type="button" data-is="ekran" data-ekran="veri">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+      <span>Veri</span>
+    </button>
+  </nav>
+
+  <input type="file" id="dosya" accept=".json,application/json,text/plain" hidden>
+  <dialog id="sayfa" aria-label="Pencere"></dialog>
+</body>
+</html>
