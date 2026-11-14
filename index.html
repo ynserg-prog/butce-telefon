@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Bütçe Planlayıcı'nın telefon sürümü: simülasyon, yatırım kayıtları ve varlıklar. Veriler yalnızca bu cihazda durur.">
+  <meta name="description" content="Bütçe Planlayıcı'nın telefon sürümü: hareketler ve banka ekstreleri, simülasyon, yatırım kayıtları ve varlıklar. Veriler yalnızca bu cihazda durur.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -28,8 +28,8 @@
 
   <main id="icerik" aria-live="polite">
     <p class="yukleniyor">Yükleniyor… Bu yazı kaybolmuyorsa uygulama dosyalarının hepsi yüklenmemiş demektir:
-      index.html'in yanında app.js, hesap.js, grafik.js, depo.js, sim-worker.js, sw.js, stil.css,
-      manifest.webmanifest, ornek.json ve simge klasörü olmalı.</p>
+      index.html'in yanında app.js, hesap.js, ekstre.js, grafik.js, depo.js, sim-worker.js, sw.js, stil.css,
+      manifest.webmanifest, ornek.json, simge ve vendor klasörleri olmalı.</p>
     <noscript>
       <div class="kart"><h2>JavaScript kapalı</h2><p>Bu uygulama tarayıcıda JavaScript açıkken çalışır.</p></div>
     </noscript>
@@ -39,6 +39,10 @@
     <button type="button" data-is="ekran" data-ekran="ozet" aria-current="page">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg>
       <span>Özet</span>
+    </button>
+    <button type="button" data-is="ekran" data-ekran="hareket">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16"/><path d="m3 8 4-4 4 4"/><path d="M17 20V4"/><path d="m21 16-4 4-4-4"/></svg>
+      <span>Hareketler</span>
     </button>
     <button type="button" data-is="ekran" data-ekran="sim">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 6-7"/></svg>
@@ -59,6 +63,7 @@
   </nav>
 
   <input type="file" id="dosya" accept=".json,application/json,text/plain" hidden>
+  <input type="file" id="ekstre-dosya" accept=".pdf,.csv,.txt,.xls,.xlsx,.htm,.html,application/pdf,text/csv,text/plain,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
   <dialog id="sayfa" aria-label="Pencere"></dialog>
 </body>
 </html>

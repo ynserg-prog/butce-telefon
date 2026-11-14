@@ -761,7 +761,9 @@ export function nakitHesapla(paket, durum, s, simdi) {
   const bagla = n.portfoy_bagla !== false;
   const kasaElle = "kasaElle" in s ? s.kasaElle : n.kasa_elle;
   const yatirilan = bagla && (kasaElle === null || kasaElle === undefined) ? kasaCikisi(durum.kayitlar, n.bas_ay, simdi) : 0;
-  const kasa = kasaElle !== null && kasaElle !== undefined ? Number(kasaElle) : Number(n.kasa_taban || 0) - yatirilan;
+  const kasaFarki = Number(durum.kasaFarki || 0);     // telefonda girilen hareketler ve ödemeler (yaklaşık)
+  const kasaOtomatik = Number(n.kasa_taban || 0) + kasaFarki - (bagla ? kasaCikisi(durum.kayitlar, n.bas_ay, simdi) : 0);
+  const kasa = kasaElle !== null && kasaElle !== undefined ? Number(kasaElle) : Number(n.kasa_taban || 0) + kasaFarki - yatirilan;
   const birakElle = "birakElle" in s ? s.birakElle : n.birak_elle;
   const acilSepette = (normalize(s.paylar || {}).acil || 0) > 0;
   const birak = Math.max(0, birakElle !== null && birakElle !== undefined ? Number(birakElle)
@@ -772,7 +774,7 @@ export function nakitHesapla(paket, durum, s, simdi) {
   const nP = projeksiyon.length;
   const aylikOrt = nP ? takvim.slice(0, nP).reduce((a, b) => a + b, 0) / nP
     : takvim.length ? takvim.reduce((a, b) => a + b, 0) / takvim.length : 0;
-  return { kasa, yatirilan, birak, portfoy, acilSepette, kasaElle: kasaElle ?? null, projeksiyon, takvim, uzatma,
+  return { kasa, kasaOtomatik, kasaFarki, yatirilan, birak, portfoy, acilSepette, kasaElle: kasaElle ?? null, projeksiyon, takvim, uzatma,
     aylikOrt, baslangic: Math.max(0, kasa - birak) + portfoy, ilkAy: projeksiyon.length ? projeksiyon[0].ay : "" };
 }
 
@@ -958,6 +960,7 @@ export function varligaEklenecek(kayit, varlik) {
 export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = null) {
   const varliklar = (paket.varliklar || []).map((v) => ({ ...v }));
   const kayitlar = (paket.kayitlar || []).map((k) => ({ ...k, telefonda: false }));
+  const hareketler = (paket.hareketler || []).map((h) => ({ ...h }));
   const degerler = JSON.parse(JSON.stringify(paket.portfoy_degerleri || {}));
   let plan = paket.plan || null;
   const uyarilar = [];
@@ -1004,6 +1007,29 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
       else degerler[op.ay] = { tarih: op.tarih, toplam: Number(op.toplam), sepetler: {}, elle: true };
     } else if (op.op === "plan") {
       plan = op.plan;
+    } else if (op.op === "hareket_ekle") {
+      hareketler.push({ ...hareketDuzelt(op.hareket), id: op.mobil_id, kaynak: op.hareket.tur === "kart_detay" ? "telefon" : "elle",
+        telefonda: true, odeme: op.odeme || null });
+    } else if (op.op === "hareket_guncelle") {
+      const i = hareketler.findIndex((h) => String(h.id) === String(op.hedef));
+      if (i < 0) {
+        uyarilar.push("Telefonda düzenlenen bir hareket masaüstü verisinde artık yok; düzenleme atlanacak.");
+        continue;
+      }
+      hareketler[i] = { ...hareketler[i], ...hareketDuzelt(op.hareket), id: hareketler[i].id, duzenlendi: true };
+    } else if (op.op === "hareket_sil") {
+      const i = hareketler.findIndex((h) => String(h.id) === String(op.hedef));
+      if (i >= 0) hareketler.splice(i, 1);
+    } else if (op.op === "ekstre") {
+      // masaüstündeki replace_source gibi: aynı kaynağın eski satırları (ve eski adlandırmayla aynı dosyanın bu tarih
+      // aralığındaki satırları) silinir, yenileri eklenir
+      const ts = (op.hareketler || []).map((h) => h.tarih).sort();
+      const eski = op.dosya ? `${String(op.kaynak).split(":")[0]}:${op.dosya}` : null;
+      for (let i = hareketler.length - 1; i >= 0; i--) {
+        const h = hareketler[i];
+        if (h.kaynak === op.kaynak || (eski && h.kaynak === eski && ts.length && h.tarih >= ts[0] && h.tarih <= ts[ts.length - 1])) hareketler.splice(i, 1);
+      }
+      for (const h of op.hareketler || []) hareketler.push({ ...hareketDuzelt(h), id: h.hid, kaynak: op.kaynak, telefonda: true, ekstre: op.id });
     }
   }
   for (const v of varliklar) {
@@ -1025,7 +1051,153 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
     }
   }
   kayitlar.sort((a, b) => (b.ay + b.tarih).localeCompare(a.ay + a.tarih));
-  return { varliklar, kayitlar, degerler, plan, uyarilar };
+  // hareketler: elle girilen gelir aynı ay ve akıştaki diğer geliri geçersiz kılar (masaüstündeki kural)
+  const once = (paket.hareketler || []).map((h) => ({ ...h }));
+  elleGelirUstun(once);
+  elleGelirUstun(hareketler);
+  hareketler.sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)) || String(b.id).localeCompare(String(a.id)));
+  const ay0 = simdi || buAy();
+  const odemeler = odemeDurumu(paket.odemeler || [], hareketler, ay0);
+  const n = paket.nakit || {};
+  const odenmemisMasaustu = (paket.odemeler || []).length ? (paket.odemeler || []).reduce((t, o) => t + Number(o.kalan || 0), 0)
+    : Number(n.odenmemis || 0);
+  const odenmemis = (paket.odemeler || []).length ? odemeler.reduce((t, o) => t + o.kalan, 0) : Number(n.odenmemis || 0);
+  const kasaFarki = kasaToplami(hareketler, n.bas_ay, ay0) - kasaToplami(once, n.bas_ay, ay0) + (odenmemisMasaustu - odenmemis);
+  const aylar = ayOzetiFarkli(paket.aylar || [], once, hareketler);
+  return { varliklar, kayitlar, degerler, plan, uyarilar, hareketler, odemeler, odenmemis, kasaFarki, aylar,
+    hareketDegisti: islemler.some((o) => String(o.op).startsWith("hareket_") || o.op === "ekstre") };
+}
+
+// ------------------------------------------------------------------------------------------ hareketler
+export const SAYILAN_TURLER = ["gelir", "gider"];
+
+function hareketDuzelt(h) {
+  const tarih = String(h.tarih || "").slice(0, 10);
+  return { tarih, ay: tarih.slice(0, 7), tur: h.tur, kategori: h.kategori || (h.tur === "gelir" ? "Diğer gelir" : "Diğer gider"),
+    kalem: String(h.kalem || "").trim(), tutar: Math.abs(Number(h.tutar) || 0), plan: !!h.plan, not: h.not || "" };
+}
+
+/** Masaüstündeki db.gelir_akisi ile aynı. */
+export function gelirAkisi(kategori, kalem) {
+  const akis = (x) => {
+    const t = String(x || "").toLocaleLowerCase("tr").replace(/ı/g, "i").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (t.includes("danisman")) return "danismanlik";
+    if (t.includes("maas") || t.includes("ucret") || t.includes("salary")) return "maas";
+    if (t.includes("kira")) return "kira";
+    if (t.includes("prim") || t.includes("ikramiye")) return "prim";
+    return null;
+  };
+  return akis(kalem) || akis(kategori);
+}
+
+/** db._elle_gelir_ustun: elle girilen gelir, aynı ay ve akıştaki diğer kaynaklı gelirin yerine geçer (yerine=true). */
+export function elleGelirUstun(liste) {
+  const gruplar = new Map();
+  for (const h of liste) {
+    h.yerine = false;
+    if (h.tur !== "gelir" || h.kaynak === "projeksiyon") continue;
+    const a = gelirAkisi(h.kategori, h.kalem);
+    if (!a) continue;
+    const k = `${h.ay}|${a}`;
+    if (!gruplar.has(k)) gruplar.set(k, []);
+    gruplar.get(k).push(h);
+  }
+  for (const g of gruplar.values()) {
+    const elle = g.filter((h) => h.kaynak === "elle");
+    if (!elle.length) continue;
+    for (const h of g) if (h.kaynak !== "elle") h.yerine = true;
+  }
+  return liste;
+}
+
+/** Kasadaki paraya giren gerçekleşen gelir − gider (başlangıç ayından bu aya; plan ve kart harcaması sayılmaz). */
+export function kasaToplami(liste, basAy, simdi) {
+  let t = 0;
+  for (const h of liste) {
+    if (h.plan || h.yerine || h.ay > simdi || (basAy && h.ay < basAy)) continue;
+    if (h.tur === "gelir") t += Number(h.tutar);
+    else if (h.tur === "gider") t -= Number(h.tutar);
+  }
+  return t;
+}
+
+function ayToplamlari(liste) {
+  const o = {};
+  for (const h of liste) {
+    if (h.yerine || !SAYILAN_TURLER.includes(h.tur)) continue;
+    const x = (o[h.ay] = o[h.ay] || { gelir: 0, gider: 0 });
+    x[h.tur] += Number(h.tutar);
+  }
+  return o;
+}
+
+/** Masaüstünden gelen aylık gelir-gider özetine telefondaki değişikliklerin farkı eklenir. */
+export function ayOzetiFarkli(aylar, once, sonra) {
+  const a = ayToplamlari(once), b = ayToplamlari(sonra);
+  const out = aylar.map((x) => ({ ...x }));
+  for (const m of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const dg = (b[m]?.gelir || 0) - (a[m]?.gelir || 0), dc = (b[m]?.gider || 0) - (a[m]?.gider || 0);
+    if (Math.abs(dg) < 0.005 && Math.abs(dc) < 0.005) continue;
+    let x = out.find((y) => y.ay === m);
+    if (!x) {
+      x = { ay: m, gelir: 0, gider: 0, net: 0, plan: false };
+      out.push(x);
+    }
+    x.gelir += dg;
+    x.gider += dc;
+    x.net = x.gelir - x.gider;
+    x.telefonda = true;
+  }
+  return out.sort((x, y) => x.ay.localeCompare(y.ay));
+}
+
+function adSade(x) {
+  return String(x || "").toLocaleLowerCase("tr").replace(/ı/g, "i").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Bu ayın planlı ödemeleri ve telefonda girilen karşılıkları. Masaüstü ödenen tutarı kendi eşleştirmesiyle gönderir;
+ * telefonda eklenen gerçekleşen giderler şu sırayla eşleştirilir: 'Ödendi' düğmesiyle girilen (ödeme anahtarı),
+ * aynı ya da birbirini içeren ad, aynı kategoride ±%3 tutar (borc_projeksiyon.bu_ay_odemeleri'ne benzer, yaklaşık).
+ */
+export function odemeDurumu(odemeler, hareketler, simdi) {
+  const out = odemeler.map((o) => ({ ...o, telefonda: 0, eslesen: [] }));
+  const yeni = hareketler.filter((h) => h.telefonda && h.tur === "gider" && !h.plan && h.ay === simdi);
+  const kullanildi = new Set();
+  const ekle = (o, h) => {
+    kullanildi.add(h);
+    o.telefonda += Number(h.tutar);
+    o.eslesen.push(h);
+  };
+  for (const h of yeni) {
+    if (!h.odeme) continue;
+    const o = out.find((x) => x.anahtar === h.odeme);
+    if (o) ekle(o, h);
+  }
+  const odendiMi = (o) => (o.elle ? o.elle === "odendi" : Number(o.odenen) + o.telefonda >= Number(o.planlanan) * 0.95 - 0.5);
+  for (const o of out) {
+    const a = adSade(o.kalem);
+    for (const h of yeni) {
+      if (odendiMi(o) || kullanildi.has(h) || h.odeme) continue;
+      const b = adSade(h.kalem);
+      if (a && b && (a === b || (a.length >= 4 && b.includes(a)) || (b.length >= 4 && a.includes(b)))) ekle(o, h);
+    }
+  }
+  for (const o of out) {
+    if (o.eslesen.length || odendiMi(o)) continue;
+    const kalan = Number(o.planlanan) - Number(o.odenen);
+    const aday = yeni.filter((h) => !kullanildi.has(h) && !h.odeme && h.kategori === o.kategori
+      && Math.abs(Number(h.tutar) - kalan) <= 0.03 * Number(o.planlanan));
+    if (aday.length) ekle(o, aday.sort((x, y) => Math.abs(x.tutar - kalan) - Math.abs(y.tutar - kalan))[0]);
+  }
+  for (const o of out) {
+    const odenen = Number(o.odenen) + o.telefonda;
+    o.odendi = odendiMi(o);
+    o.kalan = o.odendi ? 0 : Math.max(0, Number(o.planlanan) - odenen);
+    o.durumTel = o.elle === "odendi" ? "ödendi (işaretli)" : o.odendi ? "ödendi" : odenen > 0 ? "kısmen ödendi" : "ödenmedi";
+  }
+  return out;
 }
 
 /** Yeni paket yüklenince: masaüstüne işlenmiş işlemler düşer, kalanlar bekler. */
@@ -1065,6 +1237,36 @@ export function islemEkle(islemler, op) {
   }
   if (op.op === "plan") {
     const kalan = out.filter((x) => x.op !== "plan");
+    kalan.push(op);
+    return kalan;
+  }
+  if (op.op === "hareket_guncelle" || op.op === "hareket_sil") {
+    const hedef = String(op.hedef);
+    if (hedef.startsWith("m:")) {      // telefonda eklenmiş hareket: ekleme işlemi değişir
+      const i = out.findIndex((x) => x.op === "hareket_ekle" && x.mobil_id === hedef);
+      if (i >= 0) {
+        if (op.op === "hareket_sil") out.splice(i, 1);
+        else out[i] = { ...out[i], hareket: op.hareket };
+        return out;
+      }
+    }
+    if (hedef.startsWith("e:")) {      // telefonda okunan dökümün bir satırı: döküm işlemi değişir
+      const i = out.findIndex((x) => x.op === "ekstre" && (x.hareketler || []).some((h) => h.hid === hedef));
+      if (i >= 0) {
+        const e = { ...out[i], hareketler: out[i].hareketler.map((h) => (h.hid === hedef && op.op === "hareket_guncelle"
+          ? { ...op.hareket, hid: hedef } : h)).filter((h) => op.op !== "hareket_sil" || h.hid !== hedef) };
+        if (e.hareketler.length) out[i] = e;
+        else out.splice(i, 1);
+        return out;
+      }
+    }
+    const kalan = out.filter((x) => !(x.op === "hareket_guncelle" && String(x.hedef) === hedef));
+    const eski = out.find((x) => x.op === "hareket_guncelle" && String(x.hedef) === hedef);
+    kalan.push(op.op === "hareket_guncelle" && eski ? { ...op, id: eski.id } : op);
+    return kalan;
+  }
+  if (op.op === "ekstre") {      // aynı döküm yeniden okunursa öncekinin yerine geçer
+    const kalan = out.filter((x) => !(x.op === "ekstre" && x.kaynak === op.kaynak));
     kalan.push(op);
     return kalan;
   }
@@ -1185,6 +1387,18 @@ export function ornegiKaydir(paket, hedefAy) {
     k.tarih = gun(k.tarih);
   }
   for (const h of p.hedefler || []) h.hedef_tarih = gun(h.hedef_tarih);
+  for (const h of p.hareketler || []) {
+    h.tarih = gun(h.tarih);
+    h.ay = ay(h.ay);
+    if (typeof h.kaynak === "string") h.kaynak = h.kaynak.replace(/(\d{2})\.(\d{2})\.(\d{4})/g, (m, g, a, y) => {
+      const t = ay(`${y}-${a}`);
+      return `${g}.${t.slice(5, 7)}.${t.slice(0, 4)}`;
+    });
+  }
+  for (const o of p.odemeler || []) {
+    o.tarih = gun(o.tarih);
+    o.anahtar = String(o.anahtar || "").replace(/^\d{4}-\d{2}/, (m) => ay(m));
+  }
   for (const x of p.aylar || []) x.ay = ay(x.ay);
   if (p.plan) {
     p.plan.ilk_ay = ay(p.plan.ilk_ay);

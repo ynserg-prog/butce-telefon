@@ -2,8 +2,9 @@
 import * as H from "./hesap.js";
 import { netCubuk, yelpaze } from "./grafik.js";
 import * as depo from "./depo.js";
+import * as E from "./ekstre.js";
 
-export const SURUM = "0.10.0";
+export const SURUM = "0.11.0";
 const UYARI = "Bu uygulamadaki simülasyonlar ve öneriler yatırım tavsiyesi değildir; varsayımlara dayalı hesaplamalardır. "
   + "Kararlarınızı kendi araştırmanıza ve gerekirse lisanslı bir danışmana dayandırın.";
 const SEPET_TURU = { altin: ["altin", "gr"], acil: ["fon", "TL"], konservatif: ["mevduat", "TL"], piyasa: ["hisse", "TL"],
@@ -11,10 +12,15 @@ const SEPET_TURU = { altin: ["altin", "gr"], acil: ["fon", "TL"], konservatif: [
 const AYARLAR = { altin: { "24 ayar (gram, külçe)": 1, "22 ayar (bilezik, hatıra para)": 0.916, "21 ayar": 0.875,
   "18 ayar": 0.75, "14 ayar": 0.585 }, gumus: { "999 (külçe)": 1, "925 (takı)": 0.925 } };
 const SENARYOLAR = [1000, 2000, 5000, 10000, 20000, 50000];
-const EKRANLAR = { ozet: "Özet", sim: "Simülasyon", yatirim: "Yatırımlar", varlik: "Varlıklar", veri: "Veri" };
+const EKRANLAR = { ozet: "Özet", hareket: "Hareketler", sim: "Simülasyon", yatirim: "Yatırımlar", varlik: "Varlıklar", veri: "Veri" };
+const TUR_ADI = { gelir: "Gelir", gider: "Gider", kart_detay: "Kart harcaması", borc_girisi: "Borç girişi (yeni kredi)", devir: "Devir" };
+const VARSAYILAN_GIDER = ["Kredi taksitleri", "Kredi kartı ödemeleri", "Kişisel borç ödemesi", "Kira", "Konut (aidat, bakım, yardımcı)",
+  "Faturalar", "Market ve gıda", "Eğitim", "Sağlık ve terapi", "Ulaşım ve araç", "Sigorta, vergi, resmi", "Çocuk aktiviteleri",
+  "Ev yapım ve tadilat", "Nakit harcamalar", "Eğlence ve kişisel", "Yatırıma aktarılan", "Diğer gider"];
+const VARSAYILAN_GELIR = ["Maaş", "Danışmanlık", "Ek gelirler (kira vb.)", "Kira geliri", "Prim / ikramiye", "Yatırım geliri", "Diğer gelir"];
 
 const S = { paket: null, islemler: [], ayar: {}, fiyatElle: {}, ornek: false, sonGonderim: null, ekran: "ozet",
-  sonuc: null, karsilastirma: null, calisiyor: false, ilerleme: 0 };
+  sonuc: null, karsilastirma: null, calisiyor: false, ilerleme: 0, hareketAy: null, onizleme: null };
 let D = null;
 let kurulumIstemi = null;
 const sonrasi = [];
@@ -42,6 +48,12 @@ function toast(metin, sure = 4000) {
   t.textContent = metin;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), sure);
+}
+
+// kuruşlu tutar (hareketlerde): 1.234,56 TL; tam sayıysa 1.234 TL
+function tlK(x) {
+  const v = Number(x);
+  return Math.abs(v - Math.round(v)) >= 0.005 ? `${H.sayi(v, 2)} TL` : H.tl(v);
 }
 
 function hazirAd() {
@@ -313,18 +325,18 @@ function ekranOzet() {
   const acil = p.ozet?.acil;
   let s = durumSeritleri();
   s += `<div class="karolar">
-    ${karo("Kasadaki para", H.tl(nk.kasa), nk.kasaElle !== null ? "elle yazıldı" : nk.yatirilan ? `kayıtlı yatırımlar düşüldü` : "masaüstü hesabı", nk.kasa < 0)}
+    ${karo("Kasadaki para", H.tl(nk.kasa), nk.kasaElle !== null ? "elle yazıldı" : Math.abs(nk.kasaFarki) >= 0.5 ? "telefondaki hareketlerle (yaklaşık)" : nk.yatirilan ? `kayıtlı yatırımlar düşüldü` : "masaüstü hesabı", nk.kasa < 0)}
     ${karo("Yatırıma başlangıç", H.tl(nk.baslangic), nk.birak ? `kasada ${H.tl(nk.birak)} kalır` : "kasa + sepetler")}
     ${karo("Sepetlerdeki varlıklar", H.tl(pf.toplam), `${D.varliklar.filter((v) => v.sepet).length} varlık`)}
     ${acil ? karo("Acil durum fonu", acil.eksik > 0 ? `${H.tl(acil.eksik)} eksik` : "Tamam", `hedef ${H.tl(acil.hedef)} (${acil.ay} ay)`) : ""}
   </div>`;
   s += buAyKarti();
-  if ((p.aylar || []).length) {
+  if ((D.aylar || []).length) {
     s += `<div class="kart"><h2>Aylık gelir − gider farkı</h2><div id="g-net"></div>
       <div class="lejant"><span><i class="alan" style="background:var(--pos)"></i>Fazla</span>
       <span><i class="alan" style="background:var(--neg)"></i>Açık</span><span><i class="alan" style="background:var(--pos);opacity:.5"></i>Soluk: projeksiyon</span></div>
       ${p.nakit?.kasa_aciklama ? `<details><summary>Kasa nasıl hesaplandı?</summary><p class="not">${esc(p.nakit.kasa_aciklama)}</p></details>` : ""}</div>`;
-    sonrasi.push(() => netCubuk($("#g-net"), p.aylar));
+    sonrasi.push(() => netCubuk($("#g-net"), D.aylar));
   }
   if ((p.hedefler || []).length) {
     const ol = S.sonuc ? H.hedefOlasiliklari(S.sonuc.sonuc, S.sonuc.ilkAy, p.hedefler) : [];
@@ -359,9 +371,9 @@ function ekranSim() {
       <div class="iki"><label class="alan"><span>Süre (ay)</span><input inputmode="numeric" data-ayar="ay" value="${sa.ay}"></label>
       <label class="alan"><span>Fazla veren ayda yatırılan</span><input inputmode="decimal" data-ayar="pay" data-yuzde="1" value="${H.sayi(sa.pay * 100, 1)}"></label></div>
       <details><summary>Kasa ve projeksiyon ayrıntısı</summary>
-        <div class="iki"><label class="alan"><span>Kasadaki para (elle)</span><input inputmode="decimal" data-ayar="kasaElle" placeholder="${esc(H.sayi(Number(p.nakit.kasa_taban) - nk.yatirilan, 0))}" value="${"kasaElle" in sa && sa.kasaElle !== null ? H.sayi(sa.kasaElle, 0) : p.nakit.kasa_elle != null && !("kasaElle" in sa) ? H.sayi(p.nakit.kasa_elle, 0) : ""}"></label>
+        <div class="iki"><label class="alan"><span>Kasadaki para (elle)</span><input inputmode="decimal" data-ayar="kasaElle" placeholder="${esc(H.sayi(nk.kasaOtomatik, 0))}" value="${"kasaElle" in sa && sa.kasaElle !== null ? H.sayi(sa.kasaElle, 0) : p.nakit.kasa_elle != null && !("kasaElle" in sa) ? H.sayi(p.nakit.kasa_elle, 0) : ""}"></label>
         <label class="alan"><span>Kasada bırakılacak</span><input inputmode="decimal" data-ayar="birakElle" placeholder="${esc(H.sayi(nk.acilSepette ? 0 : p.nakit.birak_onerisi, 0))}" value="${"birakElle" in sa && sa.birakElle !== null ? H.sayi(sa.birakElle, 0) : p.nakit.birak_elle != null && !("birakElle" in sa) ? H.sayi(p.nakit.birak_elle, 0) : ""}"></label></div>
-        <p class="kucuk">Boş bırakırsanız hesaplanan değer kullanılır. Kasa = masaüstündeki gerçekleşen gelir − gider (ödenmemiş planlı ödemeler düşülmüş) − kaydettiğiniz yatırımlar.</p>
+        <p class="kucuk">Boş bırakırsanız hesaplanan değer kullanılır. Kasa = masaüstündeki gerçekleşen gelir − gider (ödenmemiş planlı ödemeler düşülmüş) + telefonda girilen hareketler − kaydettiğiniz yatırımlar.</p>
         <div class="tablo-kap"><table><thead><tr><th>Ay</th><th>Gelir</th><th>Gider</th><th>Fark</th><th>Yatırılacak</th></tr></thead><tbody>
         ${nk.projeksiyon.map((x, i) => `<tr><td>${esc(H.ayKisa(x.ay))}</td><td>${H.tl(x.gelir)}</td><td>${H.tl(x.gider)}</td><td class="${x.gelir < x.gider ? "eksi" : ""}">${H.tl(x.gelir - x.gider)}</td><td class="${nk.takvim[i] < 0 ? "eksi" : ""}">${H.tl(nk.takvim[i])}</td></tr>`).join("")}
         </tbody></table></div>
@@ -507,6 +519,76 @@ function ekranYatirim() {
   return s + uyariAlt();
 }
 
+// ------------------------------------------------------------------------------------------ Hareketler
+function kaynakEtiketi(h) {
+  if (h.telefonda) return `<span class="etiketcik bekliyor">telefonda</span>`;
+  if (h.duzenlendi) return `<span class="etiketcik bekliyor">düzenlendi</span>`;
+  return "";
+}
+function kaynakKisa(k) {
+  const x = String(k || "");
+  if (x.startsWith("excel:")) return "Excel";
+  if (x.startsWith("dokum:")) return "hesap dökümü";
+  if (x.startsWith("ekstre:")) return "kart ekstresi";
+  if (x === "elle") return "elle";
+  if (x === "telefon") return "telefon";
+  if (x === "projeksiyon") return "Gelir Projeksiyonu";
+  if (x === "borc_projeksiyonu") return "Borç Projeksiyonu";
+  return x;
+}
+
+function hareketSatiri(h) {
+  const eksi = h.tur === "gider" || h.tur === "kart_detay";
+  return `<li class="tiklanir${h.yerine ? " soluk" : ""}" data-is="hareket-ac" data-id="${esc(h.id)}"><div class="govde"><div class="baslik">${kaynakEtiketi(h)}${esc(h.kalem)}</div>
+    <div class="alt">${esc(h.kategori)} · ${esc(tarihTr(h.tarih))} · ${esc(kaynakKisa(h.kaynak))}${h.yerine ? " · elle girilen gelir yerine geçti" : ""}${h.doviz ? ` · ${H.sayi(Number(h.doviz_tutar), 2)} ${esc(h.doviz)}` : ""}</div></div>
+    <div class="tutar">${eksi ? "−" : "+"}${tlK(h.tutar)}</div></li>`;
+}
+
+function hareketAylari() {
+  const set = new Set([simdi(), ...D.hareketler.map((h) => h.ay)]);
+  return [...set].filter((m) => m <= H.ayEkle(simdi(), 1)).sort().reverse();
+}
+
+function ekranHareket() {
+  if (!S.paket) return bosEkran();
+  const aylar = hareketAylari();
+  const m = S.hareketAy && aylar.includes(S.hareketAy) ? S.hareketAy : simdi();
+  const ayin = D.hareketler.filter((h) => h.ay === m);
+  const gercek = ayin.filter((h) => !h.plan && !h.yerine);
+  const top = (tur) => gercek.filter((h) => h.tur === tur).reduce((t, h) => t + Number(h.tutar), 0);
+  const gelir = top("gelir"), gider = top("gider"), kart = top("kart_detay");
+  let s = durumSeritleri();
+  s += `<div class="kart"><div class="ay-sec"><button class="ince" data-is="hareket-ay" data-yon="-1" aria-label="Önceki ay" ${aylar.indexOf(m) >= aylar.length - 1 ? "disabled" : ""}>‹</button>
+    <select data-hareket-ay aria-label="Ay">${aylar.map((a) => `<option value="${a}" ${a === m ? "selected" : ""}>${esc(H.ay(a))}</option>`).join("")}</select>
+    <button class="ince" data-is="hareket-ay" data-yon="1" aria-label="Sonraki ay" ${aylar.indexOf(m) <= 0 ? "disabled" : ""}>›</button></div>
+    <div class="karolar">${karo("Gelir", H.tl(gelir), "gerçekleşen")}${karo("Gider", H.tl(gider), "gerçekleşen")}${karo("Fark", H.tl(gelir - gider), "", gelir - gider < 0)}${karo("Kartla harcanan", H.tl(kart), "toplama eklenmez")}</div>
+    <div class="dugmeler tam"><button class="ana" data-is="hareket-yeni">+ Hareket</button><button data-is="ekstre-sec">Ekstre / döküm yükle</button></div>
+    <p class="kucuk">E-postadaki ya da banka uygulamasındaki PDF, Excel ya da CSV dosyasını seçin. iPhone'da önce ekteki dosyayı <b>Dosyalar'a Kaydet</b>; Android'de dosyayı <b>Paylaş → Bütçe</b> ile de gönderebilirsiniz.</p></div>`;
+  if (m === simdi() && D.odemeler.length) {
+    const kalan = D.odemeler.filter((o) => o.kalan > 0);
+    s += `<div class="kart"><h2>Bu ayın planlı ödemeleri</h2><p class="not">${kalan.length ? `${kalan.length} ödeme bekliyor, toplam ${H.tl(D.odenmemis)}. Ödediğinizde <b>Ödendi</b> deyin; kasadaki para güncellenir.` : "Bu ayın planlı ödemelerinin hepsi ödenmiş görünüyor."}</p>
+      <ul class="liste">${D.odemeler.map((o) => `<li><div class="govde"><div class="baslik">${esc(o.kalem)}</div><div class="alt">${esc(tarihTr(o.tarih))} · ${esc(o.durumTel)}${o.kalan > 0 && o.kalan < o.planlanan ? ` · kalan ${H.tl(o.kalan)}` : ""}</div></div>
+        ${o.kalan > 0 ? `<button class="ince" data-is="odeme-yap" data-anahtar="${esc(o.anahtar)}">Ödendi</button>` : `<div class="tutar">${H.tl(o.planlanan)}</div>`}</li>`).join("")}</ul></div>`;
+  }
+  const bolum = (baslik, liste, acik = true) => (liste.length
+    ? `<div class="kart"><details ${acik ? "open" : ""}><summary><b>${esc(baslik)}</b> <span class="say">· ${liste.length} · ${H.tl(liste.reduce((t, h) => t + Number(h.tutar), 0))}</span></summary><ul class="liste">${liste.map(hareketSatiri).join("")}</ul></details></div>` : "");
+  s += bolum("Gelirler", ayin.filter((h) => h.tur === "gelir" && !h.plan));
+  s += bolum("Giderler", ayin.filter((h) => h.tur === "gider" && !h.plan));
+  const kartlar = ayin.filter((h) => h.tur === "kart_detay");
+  if (kartlar.length) {
+    const kat = {};
+    for (const h of kartlar) kat[h.kategori] = (kat[h.kategori] || 0) + Number(h.tutar);
+    s += `<div class="kart"><h2>Kartla harcananlar</h2><p class="not">Kart ekstresinin kırılımı: kart ödemesi zaten gider sayıldığı için toplamlara ayrıca eklenmez.</p>
+      <div class="tablo-kap"><table><tbody>${Object.entries(kat).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<tr><td style="text-align:left">${esc(k)}</td><td>${H.tl(v)}</td></tr>`).join("")}</tbody></table></div>
+      <details><summary>${kartlar.length} harcama</summary><ul class="liste">${kartlar.map(hareketSatiri).join("")}</ul></details></div>`;
+  }
+  s += bolum("Planlanan (henüz gerçekleşmedi)", ayin.filter((h) => h.plan && h.tur !== "kart_detay"), false);
+  s += bolum("Diğer (borç girişi, devir)", ayin.filter((h) => !h.plan && (h.tur === "borc_girisi" || h.tur === "devir")), false);
+  if (!ayin.length) s += `<div class="kart"><p class="not">${esc(H.ay(m))} için hareket yok. <b>+ Hareket</b> ile elle girin ya da bankanın dökümünü yükleyin.</p></div>`;
+  s += `<p class="kucuk">Telefonda girdiğiniz hareketler masaüstüne gönderilince kalıcı olur. Telefonda son 12 ayın hareketleri var; daha eskiler masaüstünde düzenlenir.</p>`;
+  return s + uyariAlt();
+}
+
 // ------------------------------------------------------------------------------------------ Varlıklar
 function ekranVarlik() {
   if (!S.paket) return bosEkran();
@@ -540,6 +622,13 @@ function islemMetni(op) {
     case "varlik_ekle": return `Yeni varlık: ${op.varlik.ad}`;
     case "ay_sonu": return op.toplam === null ? `${H.ay(op.ay)} ay sonu değeri silindi` : `${H.ay(op.ay)} ay sonu değeri: ${H.tl(op.toplam)}`;
     case "plan": return `Plan kaydı (${H.ay(op.plan.ilk_ay)} başlangıçlı, ${op.plan.aylar} ay)`;
+    case "hareket_ekle": return `Yeni ${(TUR_ADI[op.hareket.tur] || "hareket").toLocaleLowerCase("tr")}: ${op.hareket.kalem} · ${H.tl(Number(op.hareket.tutar))} (${tarihTr(op.hareket.tarih)})`;
+    case "hareket_guncelle": return `Hareket düzenlemesi: ${op.hareket.kalem} · ${H.tl(Number(op.hareket.tutar))} (${tarihTr(op.hareket.tarih)})`;
+    case "hareket_sil": {
+      const e = (S.paket.hareketler || []).find((x) => String(x.id) === String(op.hedef));
+      return `Hareket silme: ${e ? `${e.kalem} · ${H.tl(Number(e.tutar))} (${tarihTr(e.tarih)})` : "hareket"}`;
+    }
+    case "ekstre": return `${op.kart ? "Kart ekstresi" : "Hesap dökümü"}: ${op.dosya} · ${op.hareketler.length} hareket`;
     default: return op.op;
   }
 }
@@ -557,7 +646,8 @@ function kurulumKarti() {
 function ekranVeri() {
   let s = "";
   if (S.paket) {
-    s += `<div class="kart"><h2>Masaüstünden gelen veriler</h2><p class="not">${S.ornek ? "Örnek (uydurma) veriler." : `${esc(tarihTr(S.paket.olusturma))} tarihli dosya, program ${esc(S.paket.surum)}.`} ${D.varliklar.length} varlık, ${(S.paket.kayitlar || []).length} yatırım kaydı, ${(S.paket.nakit?.projeksiyon || []).length} projeksiyon ayı.</p>
+    s += `<div class="kart"><h2>Masaüstünden gelen veriler</h2><p class="not">${S.ornek ? "Örnek (uydurma) veriler." : `${esc(tarihTr(S.paket.olusturma))} tarihli dosya, program ${esc(S.paket.surum)}.`} ${(S.paket.hareketler || []).length} hareket, ${D.varliklar.length} varlık, ${(S.paket.kayitlar || []).length} yatırım kaydı, ${(S.paket.nakit?.projeksiyon || []).length} projeksiyon ayı.</p>
+      ${S.paket.hareketler ? "" : `<p class="kucuk">Bu dosyada hareketler yok: masaüstünü 0.11 sürümüne güncelleyip dosyayı yeniden gönderin.</p>`}
       <div class="dugmeler"><button class="ana" data-is="dosya-sec">Yeni dosya yükle</button></div>
       <p class="kucuk">Yeni dosya yüklendiğinde masaüstüne işlenmiş değişiklikler listeden düşer, işlenmemişler bekler.</p></div>`;
     s += `<div class="kart"><h2>Masaüstüne gönderilecekler</h2>${S.islemler.length ? `<ul class="liste">${S.islemler.map((op) => `<li><div class="govde"><div class="baslik" style="font-weight:500">${esc(islemMetni(op))}</div></div><button class="ince" data-is="islem-geri" data-id="${esc(op.id)}">Geri al</button></li>`).join("")}</ul>
@@ -581,7 +671,7 @@ function ciz() {
   rozet.textContent = `↑ ${S.islemler.length}`;
   rozet.setAttribute("aria-label", `Masaüstüne gönderilecek ${S.islemler.length} değişiklik`);
   sonrasi.length = 0;
-  const f = { ozet: ekranOzet, sim: ekranSim, yatirim: ekranYatirim, varlik: ekranVarlik, veri: ekranVeri }[S.ekran];
+  const f = { ozet: ekranOzet, hareket: ekranHareket, sim: ekranSim, yatirim: ekranYatirim, varlik: ekranVarlik, veri: ekranVeri }[S.ekran] || ekranOzet;
   $("#icerik").innerHTML = f();
   for (const b of document.querySelectorAll("nav.alt button")) {
     if (b.dataset.ekran === S.ekran) b.setAttribute("aria-current", "page");
@@ -835,6 +925,271 @@ function varlikFormu(id) {
   });
 }
 
+// ------------------------------------------------------------------------------------------ hareket formu
+function kategoriler(tur) {
+  const k = S.paket?.kategoriler;
+  if (tur === "gelir") return k?.gelir || VARSAYILAN_GELIR;
+  if (tur === "borc_girisi") return ["Kredi", "Avans", "Kişisel borç"];
+  return (k?.gider || []).map((x) => x[0]).concat(k?.gider ? [] : VARSAYILAN_GIDER);
+}
+function kategoriSecenekleri(tur, secili) {
+  const liste = kategoriler(tur);
+  const tum = secili && !liste.includes(secili) ? [secili, ...liste] : liste;
+  return tum.map((k) => `<option ${k === secili ? "selected" : ""}>${esc(k)}</option>`).join("");
+}
+
+/** h: düzenlenecek hareket (yoksa yeni); on: yeni hareket için hazır değerler (ör. planlı ödemeden). */
+function hareketFormu(h = null, on = {}) {
+  if (h && h.tur === "devir") return toast("Devir satırı masaüstünde Excel'den gelir; telefonda değiştirilmez.", 5000);
+  const v = { tarih: H.bugunIso(), tur: "gider", kategori: "", kalem: "", tutar: "", plan: false, not: "", ...on, ...(h || {}) };
+  if (!v.kategori) v.kategori = v.tur === "gelir" ? "Diğer gelir" : "Diğer gider";
+  const adlar = [...new Set(D.hareketler.filter((x) => x.tur !== "devir").map((x) => x.kalem))].slice(0, 400);
+  const excel = h && String(h.kaynak || "").startsWith("excel:");
+  const d = sayfa(`<h2>${h ? "Hareketi düzenle" : on.odeme ? "Ödemeyi kaydet" : "Yeni hareket"}</h2>
+    ${excel ? `<p class="kucuk">Bu satır masaüstüne Excel'den geldi. Değişiklik masaüstüne işlenir, ama Excel dosyası yeniden içe aktarılırsa Excel'deki değer geri gelir.</p>` : ""}
+    ${h && /^(dokum|ekstre):/.test(h.kaynak || "") && !h.telefonda ? `<p class="kucuk">Bu satır bir banka dökümünden geldi; aynı döküm yeniden içe aktarılırsa değişiklik kaybolur.</p>` : ""}
+    <form id="hareket-form" novalidate>
+      <div class="secim" role="group" aria-label="Tür">${["gider", "gelir", "kart_detay", "borc_girisi"].map((t) => `<button type="button" data-tur="${t}" aria-pressed="${t === v.tur}">${esc({ gider: "Gider", gelir: "Gelir", kart_detay: "Kart", borc_girisi: "Kredi girişi" }[t])}</button>`).join("")}</div>
+      <p class="kucuk" id="tur-not"></p>
+      <label class="alan"><span>Ne için</span><input name="kalem" list="kalem-listesi" value="${esc(v.kalem)}" placeholder="ör. Market, Kira, Maaş" autocomplete="off" required></label>
+      <datalist id="kalem-listesi">${adlar.map((a) => `<option value="${esc(a)}">`).join("")}</datalist>
+      <div class="iki"><label class="alan"><span>Tutar (TL)</span><input name="tutar" inputmode="decimal" value="${v.tutar === "" ? "" : H.sayi(Number(v.tutar), 2)}" required></label>
+      <label class="alan"><span>Tarih</span><input type="date" name="tarih" value="${esc(String(v.tarih).slice(0, 10))}" required></label></div>
+      <label class="alan"><span>Kategori</span><select name="kategori">${kategoriSecenekleri(v.tur, v.kategori)}</select></label>
+      <label class="onay"><input type="checkbox" name="plan" ${v.plan ? "checked" : ""}> Henüz gerçekleşmedi (planlanan)</label>
+      <label class="alan"><span>Not</span><input name="not" value="${esc(v.not || "")}"></label>
+      <div class="dugmeler tam"><button type="submit" class="ana">Kaydet</button>${h ? `<button type="button" class="tehlike" data-is="hareket-sil" data-id="${esc(h.id)}">Sil</button>` : ""}<button type="button" data-is="kapat">Vazgeç</button></div>
+    </form>`);
+  const f = $("#hareket-form", d);
+  let tur = v.tur, katElle = !!h || !!on.kategori;
+  const turNot = () => {
+    $("#tur-not", d).textContent = tur === "kart_detay" ? "Kartla yapılan harcama: kart ödemesi zaten gider sayıldığı için gelir-gider toplamına eklenmez, yalnızca nereye harcandığını gösterir."
+      : tur === "borc_girisi" ? "Kullanılan yeni kredi ya da avans: kasaya para girer ama gelir sayılmaz." : "";
+  };
+  const tahmin = () => {
+    if (katElle) return;
+    const t = tur === "kart_detay" ? "gider" : tur;
+    const ayni = D.hareketler.find((x) => x.kalem === f.kalem.value.trim() && (x.tur === tur || (t === "gider" && x.tur === "gider")));
+    const k = ayni ? ayni.kategori : tur === "borc_girisi" ? "Kredi" : E.kategoriTahmin(E.taksitsiz(f.kalem.value), t, S.paket.kurallar);
+    f.kategori.innerHTML = kategoriSecenekleri(tur, k);
+  };
+  d.querySelectorAll("[data-tur]").forEach((b) => b.addEventListener("click", () => {
+    tur = b.dataset.tur;
+    d.querySelectorAll("[data-tur]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    const k = f.kategori.value;
+    f.kategori.innerHTML = kategoriSecenekleri(tur, kategoriler(tur).includes(k) ? k : null);
+    katElle = kategoriler(tur).includes(k) && katElle;
+    turNot();
+    tahmin();
+  }));
+  f.kalem.addEventListener("input", tahmin);
+  f.kategori.addEventListener("change", () => { katElle = true; });
+  f.tarih.addEventListener("change", () => { if (!h) f.plan.checked = f.tarih.value > H.bugunIso(); });
+  turNot();
+  if (!h && !on.kategori) tahmin();
+  f.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const tutar = sayiOku(f.tutar.value);
+    if (!(tutar > 0)) return toast("Tutarı yazın.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.tarih.value)) return toast("Tarihi seçin.");
+    const kalem = f.kalem.value.trim();
+    if (!kalem) return toast("Ne için olduğunu yazın.");
+    const hareket = { tarih: f.tarih.value, ay: f.tarih.value.slice(0, 7), tur, kategori: f.kategori.value, kalem, tutar,
+      plan: f.plan.checked, not: f.not.value.trim() };
+    if (h) S.islemler = H.islemEkle(S.islemler, { id: H.kimlik(), op: "hareket_guncelle", hedef: h.id, hareket });
+    else {
+      const op = { id: H.kimlik(), op: "hareket_ekle", mobil_id: "m:" + H.kimlik(), hareket };
+      if (on.odeme) op.odeme = on.odeme;
+      S.islemler = H.islemEkle(S.islemler, op);
+    }
+    S.hareketAy = hareket.ay;
+    sayfaKapat();
+    degisti();
+    toast(`${kalem}: ${H.tl(tutar)} kaydedildi. Masaüstüne göndermeyi unutmayın.`);
+  });
+}
+
+async function hareketSil(id) {
+  const h = D.hareketler.find((x) => String(x.id) === String(id));
+  if (!h) return;
+  const ok = await soru("Hareketi sil", `'${esc(h.kalem)}' (${esc(H.tl(Number(h.tutar)))}, ${esc(tarihTr(h.tarih))}) silinsin mi?`
+    + (String(h.kaynak || "").startsWith("excel:") ? " Excel yeniden içe aktarılırsa satır geri gelir." : ""),
+  [{ ad: "Sil", deger: true, tur: "tehlike" }, { ad: "Vazgeç", deger: null }]);
+  if (!ok) return;
+  S.islemler = H.islemEkle(S.islemler, { id: H.kimlik(), op: "hareket_sil", hedef: h.id });
+  degisti();
+  toast("Hareket silindi.");
+}
+
+// ------------------------------------------------------------------------------------------ ekstre / döküm
+let pdfjsSoz = null;
+function pdfjsYukle() {
+  if (!pdfjsSoz) {
+    pdfjsSoz = import("./vendor/pdf.min.js").then((m) => {
+      m.GlobalWorkerOptions.workerSrc = new URL("vendor/pdf.worker.min.js", location.href).href;
+      return m;
+    }).catch((e) => {
+      pdfjsSoz = null;
+      throw new Error(`PDF okuyucu yüklenemedi (${e.message}). Uygulama dosyalarının hepsi yüklendi mi (vendor klasörü)?`);
+    });
+  }
+  return pdfjsSoz;
+}
+
+async function pdfMetni(bytes) {
+  const pdfjs = await pdfjsYukle();
+  return E.pdfMetniCikar(pdfjs, bytes, (yanlis) => parolaSor("Parolalı PDF", yanlis
+    ? "Parola yanlış. Yeniden deneyin."
+    : "Bu ekstre parolalı. Parola genellikle ekstre e-postasında ya da bankanın bildiriminde yazar. Parola saklanmaz."));
+}
+
+async function ekstreYukle(file) {
+  if (!S.paket) return toast("Önce masaüstünden telefon dosyasını yükleyin ya da örnek verileri açın.", 6000);
+  let bytes;
+  try {
+    bytes = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    return toast("Dosya okunamadı.");
+  }
+  const bekle = document.createElement("div");
+  bekle.className = "toast";
+  bekle.textContent = "Döküm okunuyor…";
+  document.body.appendChild(bekle);
+  let r;
+  try {
+    r = await E.ekstreOku(bytes, file.name || "dosya", pdfMetni);
+  } catch (e) {
+    bekle.remove();
+    if (!e.vazgecildi) toast(`Dosya okunamadı: ${e.message}`, 8000);
+    return;
+  }
+  bekle.remove();
+  const ad = (file.name || `dokum-${H.bugunIso()}`).slice(0, 120);
+  S.onizleme = { ad, ham: r.satirlar, metin: r.metin, bicim: r.bicim, kart: E.kartMi(r.metin, ad, r.satirlar, r.bakiyeVar) };
+  onizlemeKur();
+  onizlemeAc();
+}
+
+function onizlemeKur() {
+  const o = S.onizleme;
+  const tarihler = o.ham.map((x) => x.tarih);
+  o.kaynak = E.kaynakAdi(o.kart, o.ad, tarihler);
+  const ts = [...tarihler].sort();
+  const eski = `${o.kart ? "ekstre" : "dokum"}:${o.ad}`;
+  // bu dosyanın daha önce aktarılmış hali yenisiyle değişecek: mükerrer sayılmasın
+  const ayni = (h) => h.kaynak === o.kaynak || (h.kaynak === eski && h.tarih >= ts[0] && h.tarih <= ts[ts.length - 1]);
+  o.onceki = D.hareketler.filter(ayni).length;
+  o.satirlar = E.onizleme(o.ham, o.kart, D.hareketler.filter((h) => !ayni(h)), S.paket.kurallar, H.bugunIso());
+}
+
+/** Döküm aylarında zaten kayıtlı gerçekleşen giderler (Excel vb.): aynı ödemeler iki kez sayılmasın. */
+function mevcutUyari(o) {
+  const aylar = [...new Set(o.satirlar.map((x) => x.ay))].sort();
+  const parca = aylar.map((m) => {
+    const l = D.hareketler.filter((h) => h.ay === m && h.tur === "gider" && !h.plan && !String(h.kaynak || "").startsWith(o.kart ? "ekstre:" : "dokum:"));
+    return l.length ? `${H.ay(m)}: ${l.length} gider, ${H.tl(l.reduce((t, h) => t + Number(h.tutar), 0))}` : null;
+  }).filter(Boolean);
+  if (!parca.length) return "";
+  return serit("uyari", "!", `Bu aylarda zaten kayıtlı giderler var (${esc(parca.join("; "))}). Excel'de de yazdığınız ödemeleri (kira, kredi, kart ödemesi…) işaretsiz bırakın; yoksa iki kez sayılır.`);
+}
+
+function onizlemeOzeti(o) {
+  const sec = o.satirlar.filter((x) => x.sec);
+  const top = (t) => sec.filter((x) => x.tur === t).reduce((a, x) => a + x.tutar, 0);
+  const metin = o.kart ? `Seçilen ${sec.length} harcama: ${H.tl(top("kart_detay"))}. Kart harcamaları gelir-gider toplamına eklenmez (kart ödemesi zaten gider), yalnızca nereye harcandığını gösterir.`
+    : `Seçilen ${sec.length} hareket: gelir ${H.tl(top("gelir"))}, gider ${H.tl(top("gider"))}${top("borc_girisi") ? `, kredi girişi ${H.tl(top("borc_girisi"))}` : ""}.`;
+  return { sayi: sec.length, metin };
+}
+
+function onizlemeAc() {
+  const o = S.onizleme;
+  const ts = o.satirlar.map((x) => x.tarih).sort();
+  const oz = onizlemeOzeti(o);
+  const kapali = o.satirlar.filter((x) => !x.sec).length;
+  const d = sayfa(`<h2>${esc(o.ad)}</h2>
+    <p class="kucuk">${o.satirlar.length} satır · ${esc(tarihTr(ts[0]))} – ${esc(tarihTr(ts[ts.length - 1]))} · ${esc(o.bicim.toUpperCase())}</p>
+    <div class="secim" role="group" aria-label="Dosya türü"><button type="button" data-ek-kart="0" aria-pressed="${!o.kart}">Hesap dökümü</button><button type="button" data-ek-kart="1" aria-pressed="${o.kart}">Kredi kartı ekstresi</button></div>
+    ${o.onceki ? serit("bilgi", "i", `Bu dosya daha önce aktarılmış (${o.onceki} hareket). Eklerseniz öncekilerin yerine geçer.`) : ""}
+    ${o.kart ? "" : mevcutUyari(o)}
+    ${kapali ? `<p class="not">${kapali} satır işaretsiz: zaten kayıtlı olabilir, ödeme/iade ya da hesaplar arası aktarım olabilir. Gerekirse işaretleyin.</p>` : ""}
+    <p><b id="ek-ozet">${esc(oz.metin)}</b></p>
+    <div class="ek-liste">${o.satirlar.map((x, i) => `<div class="ek-satir${x.sec ? "" : " kapali"}">
+      <label class="ek-ust"><input type="checkbox" data-ek-sec="${i}" ${x.sec ? "checked" : ""}><span class="ek-ad">${esc(x.kalem)}</span><span class="ek-tutar say">${x.tur === "gelir" || x.tur === "borc_girisi" ? "+" : "−"}${tlK(x.tutar)}</span></label>
+      <div class="ek-alt"><span class="kucuk">${esc(tarihTr(x.tarih))}${x.plan ? " · ileri tarihli" : ""}</span>
+        ${o.kart ? "" : `<select data-ek-tur="${i}" aria-label="Tür">${["gelir", "gider", "borc_girisi"].map((t) => `<option value="${t}" ${t === x.tur ? "selected" : ""}>${esc({ gelir: "Gelir", gider: "Gider", borc_girisi: "Kredi girişi" }[t])}</option>`).join("")}</select>`}
+        <select data-ek-kat="${i}" aria-label="Kategori">${kategoriSecenekleri(x.tur === "kart_detay" ? "gider" : x.tur, x.kategori)}</select></div>
+      ${x.not ? `<div class="ek-not">${esc(x.not)}</div>` : ""}</div>`).join("")}</div>
+    <div class="dugmeler tam yapiskan"><button type="button" class="ana" data-ek="ekle" ${oz.sayi ? "" : "disabled"}>${oz.sayi} hareketi ekle</button><button type="button" data-is="kapat">Vazgeç</button></div>`);
+  const ozetYaz = () => {
+    const z = onizlemeOzeti(o);
+    $("#ek-ozet", d).textContent = z.metin;
+    const b = $("[data-ek=ekle]", d);
+    b.textContent = `${z.sayi} hareketi ekle`;
+    b.disabled = !z.sayi;
+  };
+  d.querySelectorAll("[data-ek-kart]").forEach((b) => b.addEventListener("click", () => {
+    const k = b.dataset.ekKart === "1";
+    if (k === o.kart) return;
+    o.kart = k;
+    onizlemeKur();
+    onizlemeAc();
+  }));
+  d.querySelectorAll("[data-ek-sec]").forEach((c) => c.addEventListener("change", () => {
+    o.satirlar[Number(c.dataset.ekSec)].sec = c.checked;
+    c.closest(".ek-satir").classList.toggle("kapali", !c.checked);
+    ozetYaz();
+  }));
+  d.querySelectorAll("[data-ek-tur]").forEach((c) => c.addEventListener("change", () => {
+    const i = Number(c.dataset.ekTur), x = o.satirlar[i];
+    x.tur = c.value;
+    x.kategori = x.tur === "borc_girisi" ? "Kredi" : E.kategoriTahmin(x.kalem, x.tur, S.paket.kurallar);
+    $(`[data-ek-kat="${i}"]`, d).innerHTML = kategoriSecenekleri(x.tur, x.kategori);
+    c.closest(".ek-satir").querySelector(".ek-tutar").textContent = `${x.tur === "gider" ? "−" : "+"}${tlK(x.tutar)}`;
+    ozetYaz();
+  }));
+  d.querySelectorAll("[data-ek-kat]").forEach((c) => c.addEventListener("change", () => {
+    const x = o.satirlar[Number(c.dataset.ekKat)];
+    x.kategori = c.value;
+    for (const y of o.satirlar) if (y !== x && y.kalem === x.kalem && y.tur === x.tur) y.kategori = c.value;   // aynı ad: hepsi
+  }));
+  $("[data-ek=ekle]", d).addEventListener("click", () => {
+    const secilen = o.satirlar.filter((x) => x.sec);
+    if (!secilen.length) return toast("Eklenecek satır seçin.");
+    const op = { id: H.kimlik(), op: "ekstre", kaynak: o.kaynak, kart: o.kart, dosya: o.ad,
+      hareketler: secilen.map((x) => ({ hid: "e:" + H.kimlik(), tarih: x.tarih, ay: x.ay, tur: x.tur, kategori: x.kategori,
+        kalem: x.kalem, tutar: x.tutar, plan: x.plan, not: "" })) };
+    S.islemler = H.islemEkle(S.islemler, op);
+    S.hareketAy = secilen.map((x) => x.ay).sort().pop();
+    S.onizleme = null;
+    S.ekran = "hareket";
+    sayfaKapat();
+    degisti();
+    window.scrollTo(0, 0);
+    toast(`${secilen.length} hareket eklendi. Masaüstüne göndermeyi unutmayın.`, 5000);
+  });
+}
+
+// Android: başka uygulamadan 'Paylaş → Bütçe' ile gelen dosyalar (sw.js önbelleğe koyar)
+async function paylasilanlariAl() {
+  if (!new URLSearchParams(location.search).has("paylasilan") || !("caches" in window)) return;
+  history.replaceState(null, "", location.pathname);
+  try {
+    const c = await caches.open("butce-paylasilan");
+    const istekler = await c.keys();
+    for (const ist of istekler) {
+      const yanit = await c.match(ist);
+      await c.delete(ist);
+      if (!yanit) continue;
+      const ad = decodeURIComponent(yanit.headers.get("X-Dosya-Adi") || "paylasilan");
+      const file = new File([await yanit.blob()], ad, { type: yanit.headers.get("Content-Type") || "" });
+      if (/\.json$/i.test(ad) || /json/.test(file.type)) await dosyaYukle(file);
+      else await ekstreYukle(file);
+    }
+  } catch (e) {
+    toast(`Paylaşılan dosya açılamadı: ${e.message}`, 6000);
+  }
+}
+
 // ------------------------------------------------------------------------------------------ dosyalar
 async function dosyaYukle(file) {
   let metin;
@@ -1007,6 +1362,22 @@ const ISLER = {
   "kayit-ac": (b) => kayitFormu(D.kayitlar.find((k) => String(k.id) === b.dataset.id)),
   "kayit-sil": (b) => kayitSil(b.dataset.id),
   "ay-sonu": aySonuFormu,
+  "hareket-yeni": () => hareketFormu(null, { tarih: S.hareketAy && S.hareketAy !== simdi() ? `${S.hareketAy}-01` : H.bugunIso() }),
+  "hareket-ac": (b) => hareketFormu(D.hareketler.find((h) => String(h.id) === b.dataset.id)),
+  "hareket-sil": (b) => hareketSil(b.dataset.id),
+  "hareket-ay": (b) => {
+    const aylar = hareketAylari();
+    const i = aylar.indexOf(S.hareketAy && aylar.includes(S.hareketAy) ? S.hareketAy : simdi()) - Number(b.dataset.yon);
+    if (i >= 0 && i < aylar.length) S.hareketAy = aylar[i];
+    ciz();
+  },
+  "odeme-yap": (b) => {
+    const o = D.odemeler.find((x) => x.anahtar === b.dataset.anahtar);
+    if (!o) return;
+    hareketFormu(null, { tur: "gider", kalem: o.kalem, kategori: o.kategori, tutar: o.kalan, odeme: o.anahtar,
+      tarih: H.bugunIso() });
+  },
+  "ekstre-sec": () => $("#ekstre-dosya").click(),
   "varlik-ac": (b) => varlikFormu(b.dataset.id),
   gonder,
   "islem-geri": async (b) => {
@@ -1074,6 +1445,10 @@ function olaylariBagla() {
   document.addEventListener("change", (e) => {
     const t = e.target;
     if (t.dataset.ayar) ayarDegisti(t);
+    else if (t.dataset.hareketAy !== undefined) {
+      S.hareketAy = t.value;
+      ciz();
+    }
     else if (t.dataset.pay !== undefined) {
       const v = sayiOku(t.value);
       const p = { ...simAyar().paylar };
@@ -1097,6 +1472,11 @@ function olaylariBagla() {
     e.target.value = "";
     if (f) dosyaYukle(f);
   });
+  $("#ekstre-dosya").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (f) ekstreYukle(f);
+  });
   $("#sayfa").addEventListener("click", (e) => {
     if (e.target === $("#sayfa")) sayfaKapat();
   });
@@ -1116,18 +1496,27 @@ function olaylariBagla() {
 
 function swKaydet() {
   if (!("serviceWorker" in navigator) || location.protocol === "file:") return;
+  // Yeni sürüm uygulama açılmadan önce inmiş ve bekliyor olabilir (updatefound bu sayfada hiç tetiklenmez):
+  // bekleyen sürüm için de "Yenile" gösterilir. Uygulama arka plandan dönünce yeni sürüm yeniden aranır.
+  const yeniSurumHazir = (yeni) => {
+    if (!yeni || !navigator.serviceWorker.controller || document.getElementById("yeni-surum")) return;
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.id = "yeni-surum";
+    t.innerHTML = `Yeni sürüm hazır. <button class="ince" style="margin-left:8px">Yenile</button>`;
+    t.querySelector("button").addEventListener("click", () => yeni.postMessage("hemen"));
+    document.body.appendChild(t);
+  };
   navigator.serviceWorker.register("sw.js").then((reg) => {
+    if (reg.waiting) yeniSurumHazir(reg.waiting);
     reg.addEventListener("updatefound", () => {
       const yeni = reg.installing;
       yeni?.addEventListener("statechange", () => {
-        if (yeni.state === "installed" && navigator.serviceWorker.controller) {
-          const t = document.createElement("div");
-          t.className = "toast";
-          t.innerHTML = `Yeni sürüm hazır. <button class="ince" style="margin-left:8px">Yenile</button>`;
-          t.querySelector("button").addEventListener("click", () => yeni.postMessage("hemen"));
-          document.body.appendChild(t);
-        }
+        if (yeni.state === "installed") yeniSurumHazir(yeni);
       });
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") reg.update().catch(() => {});
     });
   }).catch(() => { /* çevrimdışı çalışma olmadan da uygulama açılır */ });
   let yenilendi = false;
@@ -1146,6 +1535,7 @@ async function basla() {
   turet();
   ciz();
   swKaydet();
+  paylasilanlariAl();
 }
 
 basla();

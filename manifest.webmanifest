@@ -1,7 +1,7 @@
 {
   "name": "Bütçe Planlayıcı",
   "short_name": "Bütçe",
-  "description": "Bütçe Planlayıcı'nın telefon sürümü: simülasyon, yatırım kayıtları ve varlıklar. Veriler yalnızca bu cihazda durur.",
+  "description": "Hareketler ve banka ekstreleri, bütçe simülasyonu ve yatırım takibi. Veriler yalnızca bu cihazda durur.",
   "lang": "tr",
   "dir": "ltr",
   "id": "./",
@@ -11,10 +11,56 @@
   "orientation": "portrait",
   "background_color": "#f9f9f7",
   "theme_color": "#f9f9f7",
-  "categories": ["finance", "productivity"],
+  "categories": [
+    "finance",
+    "productivity"
+  ],
   "icons": [
-    { "src": "simge/simge-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "simge/simge-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "simge/simge-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
+    {
+      "src": "simge/simge-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "simge/simge-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "simge/simge-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "share_target": {
+    "action": "./paylas",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "baslik",
+      "text": "metin",
+      "files": [
+        {
+          "name": "dosya",
+          "accept": [
+            "application/pdf",
+            ".pdf",
+            "text/csv",
+            ".csv",
+            "text/plain",
+            ".txt",
+            "application/vnd.ms-excel",
+            ".xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xlsx",
+            "application/json",
+            ".json"
+          ]
+        }
+      ]
+    }
+  }
 }

@@ -132,7 +132,7 @@ main {
 
 nav.alt {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   height: calc(var(--tab-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
@@ -145,7 +145,8 @@ nav.alt button {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   font-size: 11.5px; font-weight: 600; padding: 6px 0 4px; font-family: inherit;
 }
-nav.alt button svg { width: 24px; height: 24px; }
+nav.alt button svg { width: 23px; height: 23px; }
+nav.alt button span { font-size: clamp(9.5px, 2.75vw, 11.5px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding: 0 1px; }
 nav.alt button[aria-current="page"] { color: var(--accent); }
 
 .kart {
@@ -299,3 +300,23 @@ ol.adim li { margin-bottom: 6px; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Hareketler */
+.liste li.soluk { opacity: 0.55; }
+.ay-sec { display: grid; grid-template-columns: 44px 1fr 44px; gap: 8px; align-items: center; margin-bottom: 12px; }
+.ay-sec select { font-weight: 650; text-align: center; text-align-last: center; }
+.ay-sec button { min-height: 42px; font-size: 20px; padding: 0; }
+details > summary { cursor: pointer; padding: 2px 0; }
+details > summary .say { color: var(--muted); font-weight: 500; }
+.ek-liste { margin: 8px 0 0; }
+.ek-satir { padding: 10px 0; border-top: 1px solid var(--border); }
+.ek-satir.kapali .ek-ad, .ek-satir.kapali .ek-tutar { opacity: 0.55; }
+.ek-ust { display: flex; gap: 10px; align-items: flex-start; margin: 0; }
+.ek-ad { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; font-size: 14.5px; }
+.ek-tutar { white-space: nowrap; font-weight: 650; }
+.ek-alt { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 6px 0 0 32px; }
+.ek-alt select { flex: 1 1 130px; min-height: 36px; font-size: 14px; padding: 4px 8px; width: auto; }
+.ek-alt .kucuk { flex: 0 0 auto; margin: 0; }
+.ek-not { margin: 4px 0 0 32px; font-size: 12.5px; color: var(--warn-ink); }
+.dugmeler.yapiskan { position: sticky; bottom: calc(-16px - env(safe-area-inset-bottom)); z-index: 2; background: var(--surface);
+  margin: 8px -16px calc(-16px - env(safe-area-inset-bottom)); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
