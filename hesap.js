@@ -27,6 +27,13 @@ export function yuzdeIsaretli(x) {
   return (x >= 0 ? "+" : "−") + "%" + (Math.abs(x) * 100).toFixed(1).replace(".", ",");
 }
 
+/** Kuruşlu TL: 12.345,60 TL (ekstre tutarları). */
+export function tlKurus(x) {
+  if (x === null || x === undefined || x === "" || !Number.isFinite(Number(x))) return "–";
+  const [t, k] = Math.abs(Number(x)).toFixed(2).split(".");
+  return `${Number(x) < 0 ? "-" : ""}${binlik(t)},${k} TL`;
+}
+
 export function sayi(x, ondalik = 2) {
   if (x === null || x === undefined || Number.isNaN(x)) return "–";
   const s = Math.abs(x).toFixed(ondalik);
@@ -961,6 +968,7 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
   const varliklar = (paket.varliklar || []).map((v) => ({ ...v }));
   const kayitlar = (paket.kayitlar || []).map((k) => ({ ...k, telefonda: false }));
   const hareketler = (paket.hareketler || []).map((h) => ({ ...h }));
+  const ekstreler = (paket.ekstreler || []).map((e) => ({ ...e, telefonda: false }));
   const degerler = JSON.parse(JSON.stringify(paket.portfoy_degerleri || {}));
   let plan = paket.plan || null;
   const uyarilar = [];
@@ -1030,6 +1038,8 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
         if (h.kaynak === op.kaynak || (eski && h.kaynak === eski && ts.length && h.tarih >= ts[0] && h.tarih <= ts[ts.length - 1])) hareketler.splice(i, 1);
       }
       for (const h of op.hareketler || []) hareketler.push({ ...hareketDuzelt(h), id: h.hid, kaynak: op.kaynak, telefonda: true, ekstre: op.id });
+      for (let i = ekstreler.length - 1; i >= 0; i--) if (ekstreler[i].kaynak === op.kaynak) ekstreler.splice(i, 1);
+      if (op.kart) ekstreler.push(telefonEkstresi(op, ekstreler));
     }
   }
   for (const v of varliklar) {
@@ -1057,14 +1067,15 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
   elleGelirUstun(hareketler);
   hareketler.sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)) || String(b.id).localeCompare(String(a.id)));
   const ay0 = simdi || buAy();
-  const odemeler = odemeDurumu(paket.odemeler || [], hareketler, ay0);
+  const odemeler = odemeDurumu(ekstreliOdemeler(paket.odemeler || [], ekstreler, ay0), hareketler, ay0);
   const n = paket.nakit || {};
   const odenmemisMasaustu = (paket.odemeler || []).length ? (paket.odemeler || []).reduce((t, o) => t + Number(o.kalan || 0), 0)
     : Number(n.odenmemis || 0);
-  const odenmemis = (paket.odemeler || []).length ? odemeler.reduce((t, o) => t + o.kalan, 0) : Number(n.odenmemis || 0);
+  const odenmemis = odemeler.length ? odemeler.reduce((t, o) => t + o.kalan, 0) : Number(n.odenmemis || 0);
   const kasaFarki = kasaToplami(hareketler, n.bas_ay, ay0) - kasaToplami(once, n.bas_ay, ay0) + (odenmemisMasaustu - odenmemis);
   const aylar = ayOzetiFarkli(paket.aylar || [], once, hareketler);
   return { varliklar, kayitlar, degerler, plan, uyarilar, hareketler, odemeler, odenmemis, kasaFarki, aylar,
+    ekstreler: ekstreDurumu(ekstreler, hareketler),
     hareketDegisti: islemler.some((o) => String(o.op).startsWith("hareket_") || o.op === "ekstre") };
 }
 
@@ -1198,6 +1209,164 @@ export function odemeDurumu(odemeler, hareketler, simdi) {
     o.durumTel = o.elle === "odendi" ? "ödendi (işaretli)" : o.odendi ? "ödendi" : odenen > 0 ? "kısmen ödendi" : "ödenmedi";
   }
   return out;
+}
+
+// ------------------------------------------------------------------------------------------ kart ekstreleri
+// Masaüstündeki butce/ekstre.py ile aynı kurallar: ekstrenin dönem borcu son ödeme gününde tek seferlik planlı ödeme
+// olur (aynı adlı planın yerine geçer); kesimden sonra yapılan aynı adlı ödeme ya da 'Ödendi' ile girilen ödeme sayılır.
+export const KART_ODEME_KATEGORISI = "Kredi kartı ödemeleri";
+export const VADE_UYARI_GUN = 5;
+const KESIMSIZ_PENCERE_GUN = 10;
+
+function adAnahtari(x) {
+  return adSade(x).replace(/ /g, "");
+}
+
+/** Masaüstündeki borc_projeksiyon.odeme_anahtari ile aynı: 'YYYY-AA|kalemanahtari'. */
+export function odemeAnahtari(kalem, tarih) {
+  return `${String(tarih).slice(0, 7)}|${adAnahtari(kalem)}`;
+}
+
+export function gunFarki(a, b) {
+  return Math.round((Date.parse(`${String(a).slice(0, 10)}T00:00:00Z`) - Date.parse(`${String(b).slice(0, 10)}T00:00:00Z`)) / 86400000);
+}
+
+function gunEkle(iso, n) {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+}
+
+/** Bu ekstrenin ödemesi sayılan tarih aralığı: kesimden (bilinmiyorsa son ödemeden 10 gün önceden) ayın sonuna. */
+export function odemePenceresi(sonOdeme, kesim) {
+  const bas = kesim && kesim <= sonOdeme ? kesim : gunEkle(sonOdeme, -KESIMSIZ_PENCERE_GUN);
+  const [y, m] = sonOdeme.split("-").map(Number);
+  const son = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+  return [bas, son];
+}
+
+export function ekstreBilgili(e) {
+  return !!(e && String(e.kart || "").trim() && e.son_odeme && e.borc !== null && e.borc !== undefined && e.borc !== ""
+    && Number.isFinite(Number(e.borc)));
+}
+
+/** Telefonda okunan ekstrenin özeti (ekstre işleminden). Aynı kartın aynı son ödemeli eski özeti düşer. */
+function telefonEkstresi(op, ekstreler) {
+  const oz = op.ozet || {};
+  const hs = op.hareketler || [];
+  const ts = hs.map((h) => String(h.tarih).slice(0, 10)).sort();
+  const sayi = (x) => (x === null || x === undefined || x === "" || !Number.isFinite(Number(x)) ? null : Number(x));
+  const e = { kaynak: op.kaynak, kart: String(oz.kart || "").trim(), kategori: oz.kategori || KART_ODEME_KATEGORISI,
+    banka: oz.banka || "", kesim: oz.kesim || null, son_odeme: oz.son_odeme || null, borc: sayi(oz.borc), asgari: sayi(oz.asgari),
+    planla: oz.planla !== false, odenen: 0, elle: "", eslesen: [], harcama: hs.length,
+    harcama_toplam: hs.reduce((t, h) => t + Math.abs(Number(h.tutar) || 0), 0), ilk: ts[0] || null, son: ts[ts.length - 1] || null,
+    telefonda: true };
+  e.anahtar = ekstreBilgili(e) ? odemeAnahtari(e.kart, e.son_odeme) : "";
+  if (e.anahtar) {
+    for (let i = ekstreler.length - 1; i >= 0; i--) {
+      if (ekstreler[i].son_odeme === e.son_odeme && adAnahtari(ekstreler[i].kart) === adAnahtari(e.kart)) ekstreler.splice(i, 1);
+    }
+  }
+  return e;
+}
+
+/** Bu ayın planlı ödemeleri + telefonda okunan ve son ödemesi bu ay olan ekstreler (aynı adlı planın yerine). */
+export function ekstreliOdemeler(odemeler, ekstreler, simdi) {
+  const out = odemeler.map((o) => ({ ...o }));
+  for (const e of ekstreler) {
+    if (!e.telefonda || !e.planla || !ekstreBilgili(e) || Number(e.borc) <= 0 || e.son_odeme.slice(0, 7) !== simdi) continue;
+    const a = adAnahtari(e.kart);
+    for (let i = out.length - 1; i >= 0; i--) if (adAnahtari(out[i].kalem) === a) out.splice(i, 1);
+    out.push({ kalem: e.kart, kategori: e.kategori, tarih: e.son_odeme, planlanan: Number(e.borc), odenen: 0, kalan: Number(e.borc),
+      anahtar: e.anahtar, kaynak: "Kart ekstresi", durum: "ödenmedi", elle: "", ekstre: e.kaynak });
+  }
+  return out.sort((x, y) => String(x.tarih).localeCompare(String(y.tarih)) || String(x.kalem).localeCompare(String(y.kalem), "tr"));
+}
+
+function ekstreOdendiMi(e) {
+  if (!ekstreBilgili(e)) return false;
+  if (e.elle) return e.elle === "odendi";
+  return Number(e.borc) <= 0 || e.odenen >= Number(e.borc) * 0.95 - 0.5;
+}
+
+/**
+ * Ekstrelerin ödeme durumu. Masaüstünden gelen ekstrede masaüstünün bulduğu ödemeye telefonda girilen ödemeler eklenir;
+ * telefonda okunan ekstrede bütün gerçekleşen ödemelere bakılır. Sıra: 'Ödendi' düğmesiyle girilen (ödeme anahtarı),
+ * ödeme penceresinde aynı ya da birbirini içeren ad.
+ */
+export function ekstreDurumu(ekstreler, hareketler) {
+  const odemeler = hareketler.filter((h) => h.tur === "gider" && !h.plan && Number(h.tutar) > 0)
+    .sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
+  const kullanildi = new Set();
+  const out = ekstreler.map((e) => ({ ...e, eslesen: [...(e.eslesen || [])], odenen: e.telefonda ? 0 : Number(e.odenen || 0) }));
+  const ekle = (e, h) => {
+    kullanildi.add(h);
+    e.odenen += Number(h.tutar);
+    e.eslesen.push({ kalem: h.kalem, tutar: Number(h.tutar), tarih: h.tarih, telefonda: !!h.telefonda });
+  };
+  const bilgili = out.filter(ekstreBilgili).sort((a, b) => a.son_odeme.localeCompare(b.son_odeme));
+  for (const e of bilgili) {
+    for (const h of odemeler) if (h.telefonda && h.odeme && h.odeme === e.anahtar && !kullanildi.has(h)) ekle(e, h);
+  }
+  for (const e of bilgili) {
+    const [bas, son] = odemePenceresi(e.son_odeme, e.kesim);
+    const a = adSade(e.kart);
+    for (const h of odemeler) {
+      if (ekstreOdendiMi(e) || kullanildi.has(h) || h.odeme || (!e.telefonda && !h.telefonda)) continue;
+      const t = String(h.tarih).slice(0, 10);
+      if (t < bas || t > son) continue;
+      const b = adSade(h.kalem);
+      if (a && b && (a === b || (a.length >= 4 && b.includes(a)) || (b.length >= 4 && a.includes(b)))) ekle(e, h);
+    }
+  }
+  for (const e of out) {
+    e.odendi = ekstreOdendiMi(e);
+    e.kalan = !ekstreBilgili(e) || e.odendi ? 0 : Math.max(0, Number(e.borc) - e.odenen);
+  }
+  return out;
+}
+
+/** eksik | odendi | gecikti | yakin (son ödemeye 5 gün ya da daha az) | bekliyor */
+export function ekstreSeviye(e, bugun) {
+  if (!ekstreBilgili(e)) return "eksik";
+  if (e.odendi) return "odendi";
+  const g = gunFarki(e.son_odeme, bugun);
+  return g < 0 ? "gecikti" : g <= VADE_UYARI_GUN ? "yakin" : "bekliyor";
+}
+
+export function ekstreDurumMetni(e, bugun) {
+  const sv = ekstreSeviye(e, bugun);
+  if (sv === "eksik") return "son ödeme tarihi / borç girilmemiş";
+  if (sv === "odendi") return e.elle === "odendi" ? "ödendi (siz işaretlediniz)" : Number(e.borc) <= 0 ? "borç yok" : "ödendi";
+  const g = gunFarki(e.son_odeme, bugun);
+  const kismi = e.odenen > 0 ? `, kalan ${tl(e.kalan)}` : "";
+  if (g < 0) return `son ödeme ${-g} gün geçti${kismi}`;
+  if (g === 0) return `bugün son gün${kismi}`;
+  return `${g} gün kaldı${kismi}`;
+}
+
+/** Uyarılacak ekstreler: ödenmemiş; son ödemesi geçmiş ya da 5 günden az kalmış (en acil önce). */
+export function vadeUyarilari(ekstreler, bugun) {
+  return (ekstreler || []).filter((e) => ["gecikti", "yakin"].includes(ekstreSeviye(e, bugun)))
+    .sort((a, b) => a.son_odeme.localeCompare(b.son_odeme));
+}
+
+/** Son ödeme günü için takvim kaydı (.ics): iki gün önce ve o sabah 9'da hatırlatır (uygulama kapalıyken de). */
+export function takvimDosyasi(e, simdi = new Date()) {
+  const gun = e.son_odeme.replace(/-/g, "");
+  const ertesi = gunEkle(e.son_odeme, 1).replace(/-/g, "");
+  const kac = (x) => String(x).replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+  const tl2 = (x) => `${tlKurus(x)}`;
+  const ozet = `${e.kart}: ekstre son ödemesi ${tl2(e.borc)}`;
+  const tarihTr = `${e.son_odeme.slice(8, 10)}.${e.son_odeme.slice(5, 7)}.${e.son_odeme.slice(0, 4)}`;
+  const aciklama = `Son ödeme ${tarihTr}. Dönem borcu ${tl2(e.borc)}${e.asgari ? `, asgari ${tl2(e.asgari)}` : ""}.`;
+  let h = 0;
+  for (const c of `${e.kaynak}|${e.son_odeme}`) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const damga = simdi.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const s = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Butce Planlayici//TR", "CALSCALE:GREGORIAN", "BEGIN:VEVENT",
+    `UID:${h.toString(16)}-${gun}@butce-planlayici`, `DTSTAMP:${damga}`, `DTSTART;VALUE=DATE:${gun}`, `DTEND;VALUE=DATE:${ertesi}`,
+    `SUMMARY:${kac(ozet)}`, `DESCRIPTION:${kac(aciklama)}`];
+  for (const t of ["-P2D", "PT9H"]) s.push("BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${kac(ozet)}`, `TRIGGER;RELATED=START:${t}`, "END:VALARM");
+  s.push("END:VEVENT", "END:VCALENDAR");
+  return `${s.join("\r\n")}\r\n`;
 }
 
 /** Yeni paket yüklenince: masaüstüne işlenmiş işlemler düşer, kalanlar bekler. */
@@ -1399,6 +1568,17 @@ export function ornegiKaydir(paket, hedefAy) {
     o.tarih = gun(o.tarih);
     o.anahtar = String(o.anahtar || "").replace(/^\d{4}-\d{2}/, (m) => ay(m));
   }
+  const kaynakKaydir = (k) => (typeof k === "string" ? k.replace(/(\d{2})\.(\d{2})\.(\d{4})/g, (m, g, a, y) => {
+    const t = ay(`${y}-${a}`);
+    return `${g}.${t.slice(5, 7)}.${t.slice(0, 4)}`;
+  }) : k);
+  for (const e of p.ekstreler || []) {
+    for (const k of ["kesim", "son_odeme", "ilk", "son"]) if (e[k]) e[k] = gun(e[k]);
+    e.anahtar = String(e.anahtar || "").replace(/^\d{4}-\d{2}/, (m) => ay(m));
+    e.kaynak = kaynakKaydir(e.kaynak);
+    for (const x of e.eslesen || []) x.tarih = gun(x.tarih);
+  }
+  for (const o of p.odemeler || []) if (o.ekstre) o.ekstre = kaynakKaydir(o.ekstre);
   for (const x of p.aylar || []) x.ay = ay(x.ay);
   if (p.plan) {
     p.plan.ilk_ay = ay(p.plan.ilk_ay);

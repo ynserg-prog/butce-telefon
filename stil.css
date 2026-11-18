@@ -320,3 +320,21 @@ details > summary .say { color: var(--muted); font-weight: 500; }
 .ek-not { margin: 4px 0 0 32px; font-size: 12.5px; color: var(--warn-ink); }
 .dugmeler.yapiskan { position: sticky; bottom: calc(-16px - env(safe-area-inset-bottom)); z-index: 2; background: var(--surface);
   margin: 8px -16px calc(-16px - env(safe-area-inset-bottom)); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); }
+
+/* kart ekstreleri (0.13) */
+.ekstre-liste { list-style: none; margin: 4px 0 0; padding: 0; }
+.ekstre-liste > li { border-top: 1px solid var(--border); }
+.ekstre-liste > li:first-child { border-top: 0; }
+.ekstre-liste details { margin: 0; }
+.ekstre-liste summary { display: flex; gap: 10px; align-items: center; padding: 10px 0; color: var(--ink); font-weight: 400; }
+.ekstre-liste summary::before { color: var(--accent); }
+.ekstre-liste summary .govde { flex: 1; min-width: 0; }
+.ekstre-liste summary .baslik { font-weight: 600; overflow-wrap: anywhere; }
+.ekstre-liste summary .alt { font-size: 13px; color: var(--muted); }
+.ekstre-liste summary .tutar { font-weight: 650; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ekstre-ic { padding: 0 0 12px 14px; }
+.ekstre-ic .dugmeler { margin-top: 8px; }
+.etiketcik.iyi { background: var(--good-bg); color: var(--good-ink); }
+.etiketcik.kritik { background: var(--crit-bg); color: var(--critical-ink); }
+.ozet-kutu { border: 1px solid var(--border); border-radius: 12px; padding: 4px 12px 10px; margin: 10px 0; }
+.ozet-kutu h3 { margin-top: 8px; }

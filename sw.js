@@ -1,5 +1,5 @@
 // Çevrimdışı çalışma: uygulama dosyaları önbellekte tutulur. Kişisel veriler önbelleğe girmez (IndexedDB'de durur).
-const SURUM = "butce-mobil-0.12.0-1";
+const SURUM = "butce-mobil-0.13.0-1";
 const DOSYALAR = [
   "./",
   "index.html",

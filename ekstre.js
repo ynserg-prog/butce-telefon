@@ -951,7 +951,8 @@ export function bicimBul(bytes, ad = "") {
 
 /**
  * Dosyadan ham hareketler. PDF için `pdfMetni(bytes)` verilmeli (app.js pdf.js ile çıkarır):
- * sayfalar -> [[{str, x, y, w, h}]]. Dönen: {bicim, satirlar, bakiyeVar, metin (tür tahmini için)}.
+ * sayfalar -> [[{str, x, y, w, h}]]. Dönen: {bicim, satirlar, bakiyeVar, metin (tür tahmini için), ozet (kart ekstresinin
+ * son ödeme tarihi, dönem borcu, asgari ödeme, kesim tarihi; bkz. ekstreOzeti), banka}.
  */
 export async function ekstreOku(bytes, ad = "", pdfMetni = null) {
   if (bytes.length > EN_BUYUK_DOSYA) throw new Error("Dosya çok büyük (en çok 25 MB).");
@@ -967,23 +968,34 @@ export async function ekstreOku(bytes, ad = "", pdfMetni = null) {
       throw new Error(ps.every((p) => !p.length) ? "PDF'te metin yok (taranmış görüntü olabilir); bankanın Excel ya da PDF ekstresini deneyin."
         : "PDF'te tarih ve tutar içeren hareket satırı bulunamadı.");
     }
-    return { bicim, ...r, metin };
+    const bankaMetni = sat.map((s) => s.map((h) => h.metin).join(" ")).filter((x) => !TARIH_BAS.test(x)).slice(0, 400).join("\n");
+    return { bicim, ...r, metin, ozet: ekstreOzeti(sat), banka: bankaBul(bankaMetni, ad) };
   }
   if (bicim === "xlsx") sayfalar = xlsxTablolar(bytes);
   else if (bicim === "xls") sayfalar = xlsTablolar(bytes);
   else if (bicim === "html") sayfalar = htmlTablolar(metinCoz(bytes));
   else sayfalar = [csvOku(metinCoz(bytes))];
-  let enIyi = null;
+  let enIyi = null, enIyiRows = null;
   for (const rows of sayfalar) {
     const r = tablodanSatirlar(rows);
     if (r && (!enIyi || r.satirlar.length > enIyi.satirlar.length)) {
       enIyi = r;
+      enIyiRows = rows;
       metin = rows.slice(0, 40).map((x) => (x || []).join(" ")).join("\n");
     }
   }
   if (!enIyi) throw new Error("Dosyada 'Tarih' ve 'Tutar' (ya da 'Borç' / 'Alacak') sütunlu bir tablo bulunamadı.");
   if (!enIyi.satirlar.length) throw new Error("Tabloda tarihli hareket satırı bulunamadı.");
-  return { bicim, ...enIyi, metin };
+  // özet kutusu hareket tablosunun sayfasında ya da başka bir sayfada olabilir: önce hareket sayfası
+  let ozet = null;
+  for (const rows of [enIyiRows, ...sayfalar.filter((x) => x !== enIyiRows)]) {
+    const o = ekstreOzeti(tablodanOzetSatirlari(rows.slice(0, EN_COK_SATIR)));
+    if (!o) continue;
+    ozet = ozet || { son_odeme: null, kesim: null, borc: null, asgari: null };
+    for (const k of Object.keys(ozet)) if (ozet[k] === null) ozet[k] = o[k];
+  }
+  const bankaMetni = sayfalar.flatMap((rows) => rows.slice(0, 200).map((x) => (x || []).join(" "))).filter((x) => !TARIH_BAS.test(x)).join("\n");
+  return { bicim, ...enIyi, metin, ozet, banka: bankaBul(bankaMetni, ad) };
 }
 
 /** Kredi kartı ekstresi mi, hesap dökümü mü (kullanıcı değiştirebilir). */
@@ -997,6 +1009,172 @@ export function kartMi(metin, ad, satirlar, bakiyeVar) {
   const eksi = satirlar.filter((s) => s.tutar < 0).length;
   if (!bakiyeVar && satirlar.length && eksi / satirlar.length < 0.2) puan += 1;    // ekstrede harcamalar işaretsiz
   return puan > 0;
+}
+
+// ------------------------------------------------------------------------------------------ ekstre özeti
+// Kart ekstresinin özet kutusu: son ödeme tarihi, dönem borcu, asgari ödeme, hesap kesim tarihi ve banka. Etiket
+// sade() ile aranır; değer önce etiketle aynı hücrede, sonra satırın sonraki hücrelerinde, sonra alttaki satırlarda
+// aynı sütunda aranır. Masaüstündeki butce/ekstre.py aynı kuralları uygular (test ikisini karşılaştırır).
+export const OZET_ETIKETLERI = [   // [alan, etiket (sade, düzenli ifade), öncelik: küçük olan seçilir]
+  ["son_odeme", "son odeme tarihi", 0], ["son_odeme", "son odeme gunu", 0], ["son_odeme", "son odeme", 1],
+  ["kesim", "hesap ozeti kesim tarihi", 0], ["kesim", "hesap kesim tarihi", 0], ["kesim", "ekstre kesim tarihi", 0],
+  ["kesim", "kesim tarihi", 0], ["kesim", "hesap kesim", 1], ["kesim", "hesap ozeti tarihi", 1], ["kesim", "ekstre tarihi", 2],
+  ["asgari", "asgari odeme tutari", 0], ["asgari", "asgari odeme", 0], ["asgari", "asgari tutar", 1],
+  ["borc", "donem borcunuz", 0], ["borc", "donem borcu", 0], ["borc", "hesap ozeti borcunuz", 0], ["borc", "hesap ozeti borcu", 0],
+  ["borc", "ekstre borcunuz", 0], ["borc", "ekstre borcu", 0], ["borc", "odenmesi gereken toplam tutar", 1],
+  ["borc", "odenmesi gereken tutar", 1], ["borc", "toplam borcunuz", 2], ["borc", "toplam borc", 2],
+  ["borc", "guncel borcunuz", 3], ["borc", "guncel borc", 3],
+];
+const OZET_RE = new RegExp(`(^|[^a-z0-9])(?:${OZET_ETIKETLERI.map(([, e]) => `(${e})`).join("|")})(?![a-z0-9])`, "g");
+const OZET_ONCEKI = /(onceki|gecen|devreden|eski)( donem)?\s*$/;     // 'Önceki dönem borcu' bu dönemin değil
+const OZET_ORAN = /^\s*(orani|oran|yuzdesi)\b/;                      // 'Asgari ödeme oranı %40' tutar değil
+const OZ_TARIH = /(\d{4})-(\d{2})-(\d{2})|(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})(?!\d)|(\d{1,2}) ([a-z]{3,})\.? (\d{4})/;
+const OZ_TUTAR = /(^|[^\d.,])([+-]?\(?\d{1,3}(?:\.\d{3})+,\d{2}\)?-?|[+-]?\(?\d+,\d{2}\)?-?|[+-]?\(?\d{1,3}(?:,\d{3})+\.\d{2}\)?-?)(?![\d.,]*\d)/g;
+const OZ_DOVIZ = /^\s*(usd|eur|gbp|\$|€|£|dolar|euro)/;
+
+function ozetTarih(x) {
+  if (typeof x === "number") return excelTarihi(x);
+  const m = sade(x).match(OZ_TARIH);
+  return m ? tarihOku(m[0]) : null;
+}
+
+function ozetTutar(x) {
+  if (typeof x === "number") return Number.isFinite(x) ? Math.round(x * 100) / 100 : null;
+  const s = sade(x);
+  if (!/\d/.test(s) || /%/.test(s.replace(/\s/g, "").slice(0, 2))) return null;
+  const tam = tutarOku(String(x ?? "").trim());        // hücrenin tamamı sayı: '4452.74', '4.452,74 TL'
+  if (tam !== null) return tam;
+  for (const m of s.matchAll(OZ_TUTAR)) {
+    if (m[1] === "%" || OZ_DOVIZ.test(s.slice(m.index + m[0].length))) continue;
+    const v = tutarOku(m[2]);
+    if (v !== null) return v;
+  }
+  return null;
+}
+
+/** Bir hücredeki etiketler: [{alan, oncelik, sonrasi}] (alan null: yalnızca ayraç, ör. 'önceki dönem borcu'). */
+function ozetEtiketleri(metin) {
+  const s = sade(metin);
+  const out = [];
+  for (const m of s.matchAll(OZET_RE)) {
+    const i = m.slice(2).findIndex((x) => x !== undefined);
+    const bas = m.index + m[1].length, son = m.index + m[0].length;
+    const [alan, , oncelik] = OZET_ETIKETLERI[i];
+    const gecersiz = OZET_ONCEKI.test(s.slice(0, bas)) || (alan !== "son_odeme" && alan !== "kesim" && OZET_ORAN.test(s.slice(son)));
+    out.push({ alan: gecersiz ? null : alan, oncelik, bas, son });
+  }
+  for (let k = 0; k < out.length; k++) out[k].sonrasi = s.slice(out[k].son, k + 1 < out.length ? out[k + 1].bas : s.length);
+  return out;
+}
+
+function ortusur(a, b) {
+  return Math.min(a.x2, b.x2) - Math.max(a.x, b.x) > 0;
+}
+
+/** Tablo satırlarını (Excel/CSV) özet aramasının satır biçimine çevirir: sütun numarası konum olur. */
+export function tablodanOzetSatirlari(rows) {
+  return (rows || []).map((r) => (r || []).map((v, j) => ({ metin: v === null || v === undefined ? "" : String(v), deger: v, x: j, x2: j + 1 }))
+    .filter((h) => h.metin.trim()));
+}
+
+/**
+ * Ekstre özeti. satirlar: [[{metin, x, x2, deger?}]] (PDF satırları ya da tablodanOzetSatirlari).
+ * Dönen: {son_odeme, kesim, borc, asgari} (bulunmayan alan null) ya da hiçbiri yoksa null.
+ */
+export function ekstreOzeti(satirlar) {
+  const etiket = satirlar.map((satir) => satir.map((h) => ozetEtiketleri(h.metin)));
+  const bulunan = {};
+  for (let i = 0; i < satirlar.length; i++) {
+    const satir = satirlar[i];
+    for (let j = 0; j < satir.length; j++) {
+      const ets = etiket[i][j];
+      for (let k = 0; k < ets.length; k++) {
+        const e = ets[k];
+        if (!e.alan || (bulunan[e.alan] && bulunan[e.alan].oncelik <= e.oncelik)) continue;
+        const oku = e.alan === "son_odeme" || e.alan === "kesim" ? ozetTarih : ozetTutar;
+        let v = oku(e.sonrasi);
+        if (v === null && k === ets.length - 1) {
+          for (let jj = j + 1; jj < satir.length && v === null; jj++) {      // aynı satırda sonraki hücreler
+            if (etiket[i][jj].length) break;
+            v = oku(satir[jj].deger ?? satir[jj].metin);
+          }
+          for (let ii = i + 1; v === null && ii <= i + 3 && ii < satirlar.length; ii++) {   // alttaki satırlar, aynı sütun
+            const a = satirlar[ii].findIndex((h) => ortusur(satir[j], h));
+            if (a < 0) continue;
+            if (etiket[ii][a].length) break;
+            v = oku(satirlar[ii][a].deger ?? satirlar[ii][a].metin);
+          }
+        }
+        if (v !== null) bulunan[e.alan] = { deger: v, oncelik: e.oncelik };
+      }
+    }
+  }
+  const oz = { son_odeme: null, kesim: null, borc: null, asgari: null };
+  for (const [k, v] of Object.entries(bulunan)) oz[k] = v.deger;
+  if (oz.kesim && oz.son_odeme && oz.kesim > oz.son_odeme) oz.kesim = null;
+  return Object.values(oz).some((x) => x !== null) ? oz : null;
+}
+
+export const BANKALAR = [   // [görünen ad, adlar, kart markaları, kalem adlarında geçebilecek diğer adlar] (sade, sözcük)
+  ["Garanti BBVA", ["garanti bbva", "garanti bankasi", "garanti"], ["bonus card", "bonus kart", "bonus kredi karti"], ["bonus"]],
+  ["Yapı Kredi", ["yapi kredi", "yapikredi", "yapi ve kredi"], ["worldcard", "world card", "world kart"], ["ykb", "world"]],
+  ["Akbank", ["akbank"], ["axess"], ["wings"]],
+  ["İş Bankası", ["is bankasi", "isbank"], ["maximiles", "maximum kart", "maximum card"], ["is bank", "maximum"]],
+  ["Ziraat Bankası", ["ziraat"], ["bankkart"], []],
+  ["Halkbank", ["halkbank", "halk bankasi"], ["paraf"], []],
+  ["VakıfBank", ["vakifbank", "vakif bank", "vakiflar bankasi"], [], ["vakif"]],
+  ["QNB", ["qnb", "finansbank"], ["cardfinans"], ["finans"]],
+  ["DenizBank", ["denizbank"], [], ["deniz"]],
+  ["TEB", ["teb", "turk ekonomi bankasi"], [], []],
+  ["ING", ["ing bank", "ing"], [], []],
+  ["Enpara", ["enpara"], [], []],
+  ["Kuveyt Türk", ["kuveyt turk"], ["saglam kart"], []],
+  ["Türkiye Finans", ["turkiye finans"], ["happy card"], []],
+  ["Şekerbank", ["sekerbank"], [], []],
+  ["Odeabank", ["odeabank"], [], []],
+  ["Fibabanka", ["fibabanka"], [], []],
+  ["HSBC", ["hsbc"], ["advantage kart", "advantage card"], ["advantage"]],
+  ["Albaraka", ["albaraka"], [], []],
+  ["Burgan Bank", ["burgan"], [], []],
+];
+
+function sozcukMetni(x) {
+  return ` ${sade(x).replace(/[^a-z0-9]+/g, " ").trim()} `;
+}
+
+function sozcukSay(metin, sozcuk) {
+  return metin.split(` ${sozcuk} `).length - 1;
+}
+
+/** Ekstrenin bankası: dosya adında ve ekstrenin hareket olmayan satırlarında en çok geçen banka adı (kart markası
+ * daha az sayılır). Bulunamazsa null. */
+export function bankaBul(metin, ad = "") {
+  const ust = sozcukMetni(`${ad}\n${String(metin || "").slice(0, 40000)}`);
+  let en = null, enPuan = 0;
+  for (const [banka, adlar, markalar] of BANKALAR) {
+    const puan = adlar.reduce((t, a) => t + 3 * sozcukSay(ust, a), 0) + markalar.reduce((t, a) => t + sozcukSay(ust, a), 0);
+    if (puan > enPuan) {
+      en = banka;
+      enPuan = puan;
+    }
+  }
+  return en;
+}
+
+/** Bankaya uyan kart ödemesi kalemi (ör. 'Garanti B. K.K'); adaylar tercih sırasıyla. Uyan yoksa null. */
+export function kartOner(banka, adaylar) {
+  const b = BANKALAR.find((x) => x[0] === banka);
+  if (!b) return null;
+  let en = null, enPuan = 0;
+  for (const k of adaylar || []) {
+    const m = sozcukMetni(k);
+    const puan = b[1].some((a) => sozcukSay(m, a)) ? 2 : [...b[2], ...b[3]].some((a) => sozcukSay(m, a)) ? 1 : 0;
+    if (puan > enPuan) {
+      en = k;
+      enPuan = puan;
+    }
+  }
+  return en;
 }
 
 // ------------------------------------------------------------------------------------------ kategori tahmini
