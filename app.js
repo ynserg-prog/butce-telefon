@@ -3,8 +3,9 @@ import * as H from "./hesap.js";
 import { netCubuk, yelpaze } from "./grafik.js";
 import * as depo from "./depo.js";
 import * as E from "./ekstre.js";
+import * as A from "./adlar.js";
 
-export const SURUM = "0.13.0";
+export const SURUM = "0.13.1";
 const UYARI = "Bu uygulamadaki simülasyonlar ve öneriler yatırım tavsiyesi değildir; varsayımlara dayalı hesaplamalardır. "
   + "Kararlarınızı kendi araştırmanıza ve gerekirse lisanslı bir danışmana dayandırın.";
 const SEPET_TURU = { altin: ["altin", "gr"], acil: ["fon", "TL"], konservatif: ["mevduat", "TL"], piyasa: ["hisse", "TL"],
@@ -603,6 +604,7 @@ function ekstreSatiri(e) {
     <div class="ekstre-ic">
       ${bilgili ? "" : `<p class="kucuk">Bu ekstrenin son ödeme tarihi ve dönem borcu yok. Ekstreyi yeniden yükleyin ya da masaüstünde <b>Hareketler → Kart ekstreleri</b>'nden girin.</p>`}
       ${bilgili && !e.planla ? `<p class="kucuk">Planlı ödemelere eklenmedi.</p>` : ""}
+      ${bilgili && e.planla && e.plan_adi && e.plan_adi !== e.kart ? `<p class="kucuk">Projeksiyondaki <b>${esc(e.plan_adi)}</b> satırının yerine planlandı (aynı kart sayıldı).</p>` : ""}
       ${e.odenen > 0 && (e.eslesen || []).length ? `<p class="kucuk">Ödeme: ${e.eslesen.map((x) => `${esc(x.kalem)} ${esc(H.tlKurus(x.tutar))} (${esc(tarihTr(x.tarih))})`).join(", ")}</p>` : ""}
       ${harcamalar.length ? `${kategoriTablosu(harcamalar)}<ul class="liste">${harcamalar.map(hareketSatiri).join("")}</ul>`
     : `<p class="kucuk">${e.harcama} harcama, ${esc(H.tlKurus(e.harcama_toplam))} (telefonda son 12 ayın hareketleri var).</p>`}
@@ -712,6 +714,7 @@ function islemMetni(op) {
       const e = (S.paket.hareketler || []).find((x) => String(x.id) === String(op.hedef));
       return `Hareket silme: ${e ? `${e.kalem} · ${H.tl(Number(e.tutar))} (${tarihTr(e.tarih)})` : "hareket"}`;
     }
+    case "odeme_isaret": return `${op.kalem || "Ödeme"}: ${op.deger === "odendi" ? "ödendi sayıldı" : op.deger === "odenmedi" ? "ödenmedi sayıldı" : "işaret kaldırıldı"}`;
     case "ekstre": return `${op.kart ? "Kart ekstresi" : "Hesap dökümü"}: ${op.dosya} · ${op.hareketler.length} hareket`
       + (op.ozet?.son_odeme && op.ozet.borc !== null ? ` · ${op.ozet.kart}, son ödeme ${tarihTr(op.ozet.son_odeme)}, ${H.tlKurus(op.ozet.borc)}` : "");
     default: return op.op;
@@ -1125,6 +1128,28 @@ function hareketFormu(h = null, on = {}) {
   });
 }
 
+/** 'Ödendi': ödemesi zaten girilmiş görünüyorsa (hiçbir ödemeye sayılmamış, tutarı ya da adı uyan gider) önce sorulur;
+ * aynı ödeme iki kez girilmesin. 'Ödendi say' yeni kayıt eklemez, ödemeyi ödendi işaretler (masaüstüne de gider). */
+async function odemeGir(o, on) {
+  const aday = H.muhtemelOdemeler(o, D.hareketler, D.odemeler, D.ekstreler, simdi()).slice(0, 4);
+  if (aday.length) {
+    const c = await soru("Bu ödeme zaten girilmiş olabilir",
+      `${esc(o.kalem)} için şu kayıt${aday.length > 1 ? "lar" : ""} henüz hiçbir ödemeye sayılmadı:<br>`
+      + aday.map((h) => `• ${esc(h.kalem)} · ${esc(H.tlKurus(Number(h.tutar)))} (${esc(tarihTr(h.tarih))})`).join("<br>")
+      + "<br><br>Aynı ödemeyse 'Ödendi say' deyin: yeni kayıt eklenmez, iki kez sayılmaz.",
+      [{ ad: "Ödendi say", deger: "isaret", tur: "ana" }, { ad: "Yeni ödeme ekle", deger: "yeni" }, { ad: "Vazgeç", deger: null }]);
+    if (!c) return;
+    if (c === "isaret") {
+      S.islemler = H.islemEkle(S.islemler, { id: H.kimlik(), op: "odeme_isaret", anahtar: o.anahtar, deger: "odendi",
+        ekstre: o.ekstre || null, kalem: o.kalem });
+      degisti();
+      toast(`${o.kalem}: ödendi sayıldı. Masaüstüne göndermeyi unutmayın.`);
+      return;
+    }
+  }
+  hareketFormu(null, on);
+}
+
 async function hareketSil(id) {
   const h = D.hareketler.find((x) => String(x.id) === String(id));
   if (!h) return;
@@ -1196,16 +1221,31 @@ function onizlemeKur() {
   // bu dosyanın daha önce aktarılmış hali yenisiyle değişecek: mükerrer sayılmasın
   const ayni = (h) => h.kaynak === o.kaynak || (h.kaynak === eski && h.tarih >= ts[0] && h.tarih <= ts[ts.length - 1]);
   o.onceki = D.hareketler.filter(ayni).length;
-  o.satirlar = E.onizleme(o.ham, o.kart, D.hareketler.filter((h) => !ayni(h)), S.paket.kurallar, H.bugunIso());
+  o.satirlar = E.onizleme(o.ham, o.kart, D.hareketler.filter((h) => !ayni(h)), S.paket.kurallar, H.bugunIso(), planliKarsiliklar());
   if (o.kart && !o.bilgi) o.bilgi = ekstreBilgisi(o);
 }
 
-/** Kart ödemesi kalemleri: masaüstündeki 'Kredi kartı ödemeleri' adları, ekstreler ve planlı ödemeler (en yeni önce). */
+/** Henüz ödenmemiş planlı ödemeler (bu ayın listesi ve başka ayların ekstreleri): dökümdeki karşılıkları bunlara bağlanır. */
+function planliKarsiliklar() {
+  const out = (D.odemeler || []).filter((o) => o.kalan > 0);
+  for (const e of D.ekstreler || []) {
+    if (!H.ekstreBilgili(e) || e.kalan <= 0 || out.some((o) => o.ekstre === e.kaynak)) continue;
+    out.push({ kalem: e.plan_adi || e.kart, kategori: e.kategori || H.KART_ODEME_KATEGORISI, planlanan: Number(e.borc), kalan: e.kalan,
+      anahtar: e.plan_anahtari || e.anahtar, tarih: e.son_odeme, pencere: H.odemePenceresi(e.son_odeme, e.kesim) });
+  }
+  return out;
+}
+
+/** Kart ödemesi kalemleri, tercih sırasıyla: projeksiyondaki adlar (bu ayın planlı ödemeleri, masaüstünün listesi:
+ * önce plan adları), sonra ekstreler ve Hareketler'deki ödeme adlarından bunlara benzemeyenler. */
 function kartAdaylari() {
-  const set = new Set(S.paket.kart_adaylari || []);
-  for (const e of D.ekstreler || []) if (e.kart) set.add(e.kart);
-  for (const h of D.hareketler) if (h.tur === "gider" && h.kategori === H.KART_ODEME_KATEGORISI) set.add(String(h.kalem).trim());
-  for (const x of D.odemeler || []) if (x.kategori === H.KART_ODEME_KATEGORISI) set.add(x.kalem);
+  const set = new Set();
+  for (const x of D.odemeler || []) if (x.kategori === H.KART_ODEME_KATEGORISI && !x.ekstre) set.add(x.kalem);
+  for (const a of S.paket.kart_adaylari || []) set.add(a);
+  const ek = [];
+  for (const e of D.ekstreler || []) if (e.kart) ek.push(e.kart);
+  for (const h of D.hareketler) if (h.tur === "gider" && h.kategori === H.KART_ODEME_KATEGORISI) ek.push(String(h.kalem).trim());
+  for (const a of ek) if (a && !set.has(a) && ![...set].some((x) => ["ad", "icerir", "sozcuk"].includes(A.adBenzer(a, x)))) set.add(a);
   return [...set].filter(Boolean);
 }
 
@@ -1265,10 +1305,12 @@ function onizlemeAc() {
   const ts = o.satirlar.map((x) => x.tarih).sort();
   const oz = onizlemeOzeti(o);
   const kapali = o.satirlar.filter((x) => !x.sec).length;
+  const planliSayi = o.satirlar.filter((x) => x.sec && x.planli).length;
   const d = sayfa(`<h2>${esc(o.ad)}</h2>
     <p class="kucuk">${o.satirlar.length} satır · ${esc(tarihTr(ts[0]))} – ${esc(tarihTr(ts[ts.length - 1]))} · ${esc(o.bicim.toUpperCase())}</p>
     <div class="secim" role="group" aria-label="Dosya türü"><button type="button" data-ek-kart="0" aria-pressed="${!o.kart}">Hesap dökümü</button><button type="button" data-ek-kart="1" aria-pressed="${o.kart}">Kredi kartı ekstresi</button></div>
     ${o.onceki ? serit("bilgi", "i", `Bu dosya daha önce aktarılmış (${o.onceki} hareket). Eklerseniz öncekilerin yerine geçer.`) : ""}
+    ${planliSayi ? serit("bilgi", "i", `${planliSayi} gider projeksiyondaki planlı ödemenin karşılığı: eklenince o ödemeye sayılır, ayrı ödeme olmaz. Planda olmayanlar yeni hareket olarak eklenir.`) : ""}
     ${o.kart ? ekstreOzetiHtml(o) : mevcutUyari(o)}
     ${kapali ? `<p class="not">${kapali} satır işaretsiz: zaten kayıtlı olabilir, ödeme/iade ya da hesaplar arası aktarım olabilir. Gerekirse işaretleyin.</p>` : ""}
     <p><b id="ek-ozet">${esc(oz.metin)}</b></p>
@@ -1321,10 +1363,17 @@ function onizlemeAc() {
   $("[data-ek=ekle]", d).addEventListener("click", () => {
     const secilen = o.satirlar.filter((x) => x.sec);
     if (!secilen.length) return toast("Eklenecek satır seçin.");
-    let ozet = null;
+    let ozet = null, eslenen = "";
     if (o.kart) {
       const b = o.bilgi;
-      const kart = (b.kart && b.kart !== "__yeni" ? b.kart : b.yeni || "").trim();
+      let kart = (b.kart && b.kart !== "__yeni" ? b.kart : b.yeni || "").trim();
+      if (kart && (!b.kart || b.kart === "__yeni")) {      // yazılan ad projeksiyondaki bir kart adına benziyorsa o ad
+        const es = A.benzerAdBul(kart, H.KART_ODEME_KATEGORISI, kartAdaylari().map((a) => [a, H.KART_ODEME_KATEGORISI]));
+        if (es && es !== kart) {
+          eslenen = `'${kart}' yerine projeksiyondaki '${es}' adı kullanıldı. `;
+          kart = es;
+        }
+      }
       const borc = b.borc === null || b.borc === undefined || Number.isNaN(b.borc) ? null : Number(b.borc);
       if (b.planla && (!kart || !/^\d{4}-\d{2}-\d{2}$/.test(b.son_odeme) || borc === null)) {
         return toast("Planlı ödeme için kartı, son ödeme tarihini ve dönem borcunu girin ya da işareti kaldırın.", 6000);
@@ -1337,7 +1386,7 @@ function onizlemeAc() {
     }
     const op = { id: H.kimlik(), op: "ekstre", kaynak: o.kaynak, kart: o.kart, dosya: o.ad, ozet,
       hareketler: secilen.map((x) => ({ hid: "e:" + H.kimlik(), tarih: x.tarih, ay: x.ay, tur: x.tur, kategori: x.kategori,
-        kalem: x.kalem, tutar: x.tutar, plan: x.plan, not: "" })) };
+        kalem: x.kalem, tutar: x.tutar, plan: x.plan, not: x.planli ? `Planlı ödeme: ${x.planli.kalem}` : "" })) };
     S.islemler = H.islemEkle(S.islemler, op);
     S.hareketAy = secilen.map((x) => x.ay).sort().pop();
     S.onizleme = null;
@@ -1345,7 +1394,7 @@ function onizlemeAc() {
     sayfaKapat();
     degisti();
     window.scrollTo(0, 0);
-    toast(`${secilen.length} hareket eklendi. Masaüstüne göndermeyi unutmayın.`, 5000);
+    toast(`${eslenen}${secilen.length} hareket eklendi. Masaüstüne göndermeyi unutmayın.`, eslenen ? 8000 : 5000);
   });
 }
 
@@ -1577,15 +1626,18 @@ const ISLER = {
   "odeme-yap": (b) => {
     const o = D.odemeler.find((x) => x.anahtar === b.dataset.anahtar);
     if (!o) return;
-    hareketFormu(null, { tur: "gider", kalem: o.kalem, kategori: o.kategori, tutar: o.kalan, odeme: o.anahtar,
+    odemeGir({ ...o }, { tur: "gider", kalem: o.kalem, kategori: o.kategori, tutar: o.kalan, odeme: o.anahtar,
       tarih: H.bugunIso() });
   },
   "ekstre-sec": () => $("#ekstre-dosya").click(),
   "ekstre-ode": (b) => {
     const e = (D.ekstreler || []).find((x) => x.kaynak === b.dataset.kaynak);
     if (!e || !H.ekstreBilgili(e)) return;
-    hareketFormu(null, { tur: "gider", kalem: e.kart, kategori: e.kategori || H.KART_ODEME_KATEGORISI,
-      tutar: Math.round((e.kalan || Number(e.borc)) * 100) / 100, odeme: e.anahtar, tarih: H.bugunIso() });
+    const kalem = e.plan_adi || e.kart, kategori = e.kategori || H.KART_ODEME_KATEGORISI;
+    odemeGir({ kalem, kategori, kalan: e.kalan, planlanan: Number(e.borc), anahtar: e.plan_anahtari || e.anahtar, ekstre: e.kaynak,
+      son_odeme: e.son_odeme, kesim: e.kesim },
+    { tur: "gider", kalem, kategori, tutar: Math.round((e.kalan || Number(e.borc)) * 100) / 100, odeme: e.plan_anahtari || e.anahtar,
+      tarih: H.bugunIso() });
   },
   "ekstre-takvim": (b) => {
     const e = (D.ekstreler || []).find((x) => x.kaynak === b.dataset.kaynak);

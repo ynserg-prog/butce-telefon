@@ -3,6 +3,8 @@
 // aynıdır; rastgele sayı üreteci farklı olduğu için sonuçlar senaryo hatası kadar (genelde %1-2) farklı çıkabilir.
 // Yatırım tavsiyesi değildir.
 
+import { adAnahtari as adAnahtariOrtak, adBenzer, benzerAdBul, farkliBanka } from "./adlar.js";
+
 // ------------------------------------------------------------------------------------------ biçimler ve aylar
 export const AY_ADI = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim",
   "Kasım", "Aralık"];
@@ -967,7 +969,9 @@ export function varligaEklenecek(kayit, varlik) {
 export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = null) {
   const varliklar = (paket.varliklar || []).map((v) => ({ ...v }));
   const kayitlar = (paket.kayitlar || []).map((k) => ({ ...k, telefonda: false }));
-  const hareketler = (paket.hareketler || []).map((h) => ({ ...h }));
+  const hareketler = (paket.hareketler || []).map((h) => ({ ...h, _sira: Number(h.id) || 0 }));
+  let telefonSira = 1e15;      // telefonda eklenenler masaüstüne bu sırayla, mevcut kayıtlardan sonra eklenir
+  const isaret = { odeme: {}, ekstre: {} };
   const ekstreler = (paket.ekstreler || []).map((e) => ({ ...e, telefonda: false }));
   const degerler = JSON.parse(JSON.stringify(paket.portfoy_degerleri || {}));
   let plan = paket.plan || null;
@@ -1017,7 +1021,7 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
       plan = op.plan;
     } else if (op.op === "hareket_ekle") {
       hareketler.push({ ...hareketDuzelt(op.hareket), id: op.mobil_id, kaynak: op.hareket.tur === "kart_detay" ? "telefon" : "elle",
-        telefonda: true, odeme: op.odeme || null });
+        telefonda: true, odeme: op.odeme || null, _sira: telefonSira++ });
     } else if (op.op === "hareket_guncelle") {
       const i = hareketler.findIndex((h) => String(h.id) === String(op.hedef));
       if (i < 0) {
@@ -1037,9 +1041,14 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
         const h = hareketler[i];
         if (h.kaynak === op.kaynak || (eski && h.kaynak === eski && ts.length && h.tarih >= ts[0] && h.tarih <= ts[ts.length - 1])) hareketler.splice(i, 1);
       }
-      for (const h of op.hareketler || []) hareketler.push({ ...hareketDuzelt(h), id: h.hid, kaynak: op.kaynak, telefonda: true, ekstre: op.id });
+      for (const h of op.hareketler || []) {
+        hareketler.push({ ...hareketDuzelt(h), id: h.hid, kaynak: op.kaynak, telefonda: true, ekstre: op.id, _sira: telefonSira++ });
+      }
       for (let i = ekstreler.length - 1; i >= 0; i--) if (ekstreler[i].kaynak === op.kaynak) ekstreler.splice(i, 1);
       if (op.kart) ekstreler.push(telefonEkstresi(op, ekstreler));
+    } else if (op.op === "odeme_isaret") {
+      if (op.anahtar) isaret.odeme[op.anahtar] = op.deger || "";
+      if (op.ekstre) isaret.ekstre[op.ekstre] = op.deger || "";
     }
   }
   for (const v of varliklar) {
@@ -1067,7 +1076,8 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
   elleGelirUstun(hareketler);
   hareketler.sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)) || String(b.id).localeCompare(String(a.id)));
   const ay0 = simdi || buAy();
-  const odemeler = odemeDurumu(ekstreliOdemeler(paket.odemeler || [], ekstreler, ay0), hareketler, ay0);
+  const durum = odemeDurumu(paket.odemeler || [], ekstreler, hareketler, ay0, isaret);
+  const odemeler = durum.odemeler;
   const n = paket.nakit || {};
   const odenmemisMasaustu = (paket.odemeler || []).length ? (paket.odemeler || []).reduce((t, o) => t + Number(o.kalan || 0), 0)
     : Number(n.odenmemis || 0);
@@ -1075,8 +1085,8 @@ export function durumKur(paket, islemler, fiyatElle = {}, simdi = null, bugun = 
   const kasaFarki = kasaToplami(hareketler, n.bas_ay, ay0) - kasaToplami(once, n.bas_ay, ay0) + (odenmemisMasaustu - odenmemis);
   const aylar = ayOzetiFarkli(paket.aylar || [], once, hareketler);
   return { varliklar, kayitlar, degerler, plan, uyarilar, hareketler, odemeler, odenmemis, kasaFarki, aylar,
-    ekstreler: ekstreDurumu(ekstreler, hareketler),
-    hareketDegisti: islemler.some((o) => String(o.op).startsWith("hareket_") || o.op === "ekstre") };
+    ekstreler: durum.ekstreler,
+    hareketDegisti: islemler.some((o) => String(o.op).startsWith("hareket_") || o.op === "ekstre" || o.op === "odeme_isaret") };
 }
 
 // ------------------------------------------------------------------------------------------ hareketler
@@ -1162,53 +1172,152 @@ export function ayOzetiFarkli(aylar, once, sonra) {
   return out.sort((x, y) => x.ay.localeCompare(y.ay));
 }
 
-function adSade(x) {
-  return String(x || "").toLocaleLowerCase("tr").replace(/ı/g, "i").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ").trim();
+/** Gerçekleşen giderler, masaüstündeki borc_projeksiyon.bu_ay_odemeleri'nin baktığı sırayla (tarih, kayıt sırası). */
+function giderSirasi(hareketler) {
+  return hareketler.filter((h) => h.tur === "gider" && !h.plan && Number(h.tutar) > 0)
+    .sort((a, b) => String(a.tarih).slice(0, 10).localeCompare(String(b.tarih).slice(0, 10)) || String(a.ay).localeCompare(String(b.ay))
+      || (a._sira ?? 0) - (b._sira ?? 0));
 }
 
 /**
- * Bu ayın planlı ödemeleri ve telefonda girilen karşılıkları. Masaüstü ödenen tutarı kendi eşleştirmesiyle gönderir;
- * telefonda eklenen gerçekleşen giderler şu sırayla eşleştirilir: 'Ödendi' düğmesiyle girilen (ödeme anahtarı),
- * aynı ya da birbirini içeren ad, aynı kategoride ±%3 tutar (borc_projeksiyon.bu_ay_odemeleri'ne benzer, yaklaşık).
+ * Planlı ödemelere gerçekleşen giderleri eşleştirir. Masaüstündeki borc_projeksiyon.bu_ay_odemeleri ile aynı kurallar
+ * ve sıra (her gider bir kez kullanılır, aynı ödemeye birden çok parça eklenebilir):
+ *   0. telefonda 'Ödendi' düğmesiyle girilen gider o ödemeye (ödeme anahtarı);
+ *   1. aynı / çok benzer ad ('Kuvety Turk K.K' / 'Kuveyt Turk K.K') ya da biri ötekini içeriyor;
+ *   2. aynı kategoride ayırt edici ortak sözcük ('Garanti kart' / 'GARANTI BBVA KK ODEME');
+ *   3. aynı kategoride aynı banka ('SAGLAM KART ODEME' / 'Kuveyt Türk kart');
+ *   4. aynı kategoride tutarı ±%3 içinde.
+ * hedefler: {kalem, kategori, planlanan, elle, pencere: [bas, son] | null, anahtarlar, onceki (masaüstünün bulduğu tutar),
+ * yalnizTelefon}. Pencere yoksa ödeme `ay` ayında aranır. kullanildi: başka hesapta kullanılan giderler (güncellenir).
  */
-export function odemeDurumu(odemeler, hareketler, simdi) {
-  const out = odemeler.map((o) => ({ ...o, telefonda: 0, eslesen: [] }));
-  const yeni = hareketler.filter((h) => h.telefonda && h.tur === "gider" && !h.plan && h.ay === simdi);
-  const kullanildi = new Set();
-  const ekle = (o, h) => {
-    kullanildi.add(h);
-    o.telefonda += Number(h.tutar);
-    o.eslesen.push(h);
-  };
-  for (const h of yeni) {
-    if (!h.odeme) continue;
-    const o = out.find((x) => x.anahtar === h.odeme);
-    if (o) ekle(o, h);
+export function odemeleriEslestir(hedefler, giderler, ay, kullanildi = new Set()) {
+  for (const o of hedefler) {
+    o.odenen = Number(o.onceki || 0);
+    o.eslesen = [];
+    o.nasil = o.onceki ? "masaüstünde" : "";
   }
-  const odendiMi = (o) => (o.elle ? o.elle === "odendi" : Number(o.odenen) + o.telefonda >= Number(o.planlanan) * 0.95 - 0.5);
-  for (const o of out) {
-    const a = adSade(o.kalem);
-    for (const h of yeni) {
-      if (odendiMi(o) || kullanildi.has(h) || h.odeme) continue;
-      const b = adSade(h.kalem);
-      if (a && b && (a === b || (a.length >= 4 && b.includes(a)) || (b.length >= 4 && a.includes(b)))) ekle(o, h);
+  const odendi = (o) => (o.elle ? o.elle === "odendi" : o.odenen >= Number(o.planlanan) * 0.95 - 0.5);
+  const uygun = (o, h) => {
+    if (kullanildi.has(h) || (o.yalnizTelefon && !h.telefonda)) return false;
+    const t = String(h.tarih).slice(0, 10);
+    return o.pencere ? t >= o.pencere[0] && t <= o.pencere[1] : h.ay === ay;
+  };
+  const ekle = (o, h, nasil) => {
+    kullanildi.add(h);
+    o.odenen += Number(h.tutar);
+    o.eslesen.push(h);
+    o.nasil = o.nasil || nasil;
+  };
+  const acik = hedefler.filter((o) => !o.elle);
+  for (const h of giderler) {
+    if (!h.odeme || kullanildi.has(h)) continue;
+    const o = acik.find((x) => (x.anahtarlar || [x.anahtar]).includes(h.odeme));
+    if (o) ekle(o, h, "Ödendi ile girildi");
+  }
+  const adimlar = [[["ad", "icerir"], "aynı ad"], [["sozcuk"], "benzer ad, aynı kategori"], [["banka"], "aynı banka, aynı kategori"]];
+  for (const [turler, nasil] of adimlar) {
+    for (const o of acik) {
+      if (odendi(o) || ((o.eslesen.length || o.onceki) && nasil !== "aynı ad" && o.nasil !== nasil)) continue;
+      for (const h of giderler) {
+        if (odendi(o)) break;
+        if (!uygun(o, h)) continue;
+        const b = adBenzer(o.kalem, h.kalem);
+        if (turler.includes(b) && ((b !== "sozcuk" && b !== "banka") || h.kategori === o.kategori)) ekle(o, h, nasil);
+      }
     }
   }
-  for (const o of out) {
-    if (o.eslesen.length || odendiMi(o)) continue;
-    const kalan = Number(o.planlanan) - Number(o.odenen);
-    const aday = yeni.filter((h) => !kullanildi.has(h) && !h.odeme && h.kategori === o.kategori
-      && Math.abs(Number(h.tutar) - kalan) <= 0.03 * Number(o.planlanan));
-    if (aday.length) ekle(o, aday.sort((x, y) => Math.abs(x.tutar - kalan) - Math.abs(y.tutar - kalan))[0]);
+  for (const o of acik) {
+    if (o.eslesen.length || o.onceki) continue;
+    let en = null, enFark = Infinity;
+    for (const h of giderler) {
+      if (!uygun(o, h) || h.kategori !== o.kategori || farkliBanka(o.kalem, h.kalem)) continue;
+      const f = Math.abs(Number(h.tutar) - Number(o.planlanan));
+      if (f <= 0.03 * Number(o.planlanan) && f < enFark) {
+        en = h;
+        enFark = f;
+      }
+    }
+    if (en) ekle(o, en, "aynı kategori ve tutar");
   }
-  for (const o of out) {
-    const odenen = Number(o.odenen) + o.telefonda;
-    o.odendi = odendiMi(o);
-    o.kalan = o.odendi ? 0 : Math.max(0, Number(o.planlanan) - odenen);
-    o.durumTel = o.elle === "odendi" ? "ödendi (işaretli)" : o.odendi ? "ödendi" : odenen > 0 ? "kısmen ödendi" : "ödenmedi";
+  for (const o of hedefler) {
+    o.odendi = odendi(o);
+    o.kalan = o.odendi ? 0 : Math.max(0, Number(o.planlanan) - o.odenen);
   }
-  return out;
+  return hedefler;
+}
+
+const eslesenOzeti = (h) => ({ kalem: h.kalem, tutar: Number(h.tutar), tarih: String(h.tarih).slice(0, 10), telefonda: !!h.telefonda });
+
+/**
+ * Bu ayın planlı ödemeleri (telefonda okunan ekstreler aynı kartın planının yerine) ve bütün kart ekstrelerinin ödeme
+ * durumu. Bu ayın ödemeleri masaüstündeki gibi baştan eşleştirilir: masaüstünden gelen ve telefonda girilen bütün
+ * gerçekleşen giderlere bakılır, her gider tek bir ödemeye sayılır (aynı ödeme iki kez görünmez).
+ * isaret: {odeme: {anahtar: 'odendi'|'odenmedi'|''}, ekstre: {kaynak: ...}} telefonda konan 'ödendi say' işaretleri.
+ */
+export function odemeDurumu(odemeler, ekstreler, hareketler, simdi, isaret = {}) {
+  const giderler = giderSirasi(hareketler);
+  const ie = isaret.ekstre || {}, io = isaret.odeme || {};
+  const eDurum = (ekstreler || []).map((e) => ({ ...e, eslesen: [], odenen: 0, masaustuOdenen: e.telefonda ? 0 : Number(e.odenen || 0),
+    masaustuEslesen: e.telefonda ? [] : [...(e.eslesen || [])], elle: ie[e.kaynak] ?? (e.elle || "") }));
+  const hedefler = ekstreliOdemeler(odemeler, eDurum, simdi);
+  for (const o of hedefler) {
+    if (io[o.anahtar] !== undefined) o.elle = io[o.anahtar];
+    else if (o.ekstre && ie[o.ekstre] !== undefined) o.elle = ie[o.ekstre];
+  }
+  const kullanildi = new Set();
+  odemeleriEslestir(hedefler, giderler, simdi, kullanildi);
+  for (const o of hedefler) {
+    o.telefonda = o.eslesen.filter((h) => h.telefonda).reduce((t, h) => t + Number(h.tutar), 0);
+    o.durumTel = o.elle === "odendi" ? "ödendi (işaretli)" : o.elle === "odenmedi" ? "ödenmedi (işaretli)" : o.odendi ? "ödendi"
+      : o.odenen > 0 ? "kısmen ödendi" : "ödenmedi";
+    const e = o.ekstre ? eDurum.find((x) => x.kaynak === o.ekstre) : null;
+    if (e && ekstreBilgili(e)) {
+      Object.assign(e, { odenen: o.odenen, eslesen: o.eslesen.map(eslesenOzeti), elle: o.elle || "", plan_adi: o.kalem,
+        plan_anahtari: o.anahtar, hesaplandi: true });
+    }
+  }
+  // bu ayın listesinde olmayan ekstreler (başka ay, planlanmamış): masaüstü ekstresine masaüstünün bulduğu ödeme + telefonda
+  // girilenler, telefonda okunana bütün giderler
+  const aylar = {};
+  for (const e of eDurum) if (ekstreBilgili(e) && !e.hesaplandi) (aylar[e.son_odeme.slice(0, 7)] ||= []).push(e);
+  for (const m of Object.keys(aylar).sort()) {
+    const hs = aylar[m].map((e) => ({ kalem: e.kart, kategori: e.kategori || KART_ODEME_KATEGORISI, planlanan: Number(e.borc),
+      elle: e.elle, pencere: odemePenceresi(e.son_odeme, e.kesim), anahtarlar: [e.anahtar], onceki: e.masaustuOdenen,
+      yalnizTelefon: !e.telefonda, e }));
+    odemeleriEslestir(hs, giderler, m, kullanildi);
+    for (const o of hs) Object.assign(o.e, { odenen: o.odenen, eslesen: [...o.e.masaustuEslesen, ...o.eslesen.map(eslesenOzeti)] });
+  }
+  for (const e of eDurum) {
+    e.odendi = ekstreOdendiMi(e);
+    e.kalan = !ekstreBilgili(e) || e.odendi ? 0 : Math.max(0, Number(e.borc) - e.odenen);
+    delete e.masaustuOdenen;
+    delete e.masaustuEslesen;
+    delete e.hesaplandi;
+  }
+  for (const o of hedefler) {
+    o.eslesen = o.eslesen.map(eslesenOzeti);
+    delete o.onceki;
+  }
+  return { odemeler: hedefler, ekstreler: eDurum };
+}
+
+/** Bir ödemenin karşılığı olabilecek, hiçbir ödemeye sayılmamış giderler ('Ödendi'ye basmadan önce: aynı ödeme iki kez
+ * girilmesin). Pencere / ayda, tutarı kalan ya da planlanan tutara %3 yakın ya da adı benzer olanlar; yakın olan önce. */
+export function muhtemelOdemeler(o, hareketler, odemeler, ekstreler, simdi) {
+  const kullanilan = new Set();
+  const anahtar = (h) => `${String(h.tarih).slice(0, 10)}|${adAnahtari(h.kalem)}|${Number(h.tutar).toFixed(2)}`;
+  for (const x of [...(odemeler || []), ...(ekstreler || [])]) for (const h of x.eslesen || []) kullanilan.add(anahtar(h));
+  const pencere = o.pencere || (o.son_odeme ? odemePenceresi(o.son_odeme, o.kesim) : null);
+  const tutarlar = [Number(o.kalan), Number(o.planlanan ?? o.borc)].filter((x) => x > 0);
+  const kalem = o.kalem || o.kart;
+  return giderSirasi(hareketler).filter((h) => {
+    if (kullanilan.has(anahtar(h))) return false;
+    const t = String(h.tarih).slice(0, 10);
+    if (pencere ? t < pencere[0] || t > pencere[1] : h.ay !== simdi) return false;
+    const b = adBenzer(kalem, h.kalem);
+    return (b && b !== "banka") || (b === "banka" && h.kategori === o.kategori)
+      || (!farkliBanka(kalem, h.kalem) && tutarlar.some((x) => Math.abs(Number(h.tutar) - x) <= 0.03 * x));
+  }).sort((a, b) => Math.min(...tutarlar.map((x) => Math.abs(a.tutar - x))) - Math.min(...tutarlar.map((x) => Math.abs(b.tutar - x))));
 }
 
 // ------------------------------------------------------------------------------------------ kart ekstreleri
@@ -1219,7 +1328,7 @@ export const VADE_UYARI_GUN = 5;
 const KESIMSIZ_PENCERE_GUN = 10;
 
 function adAnahtari(x) {
-  return adSade(x).replace(/ /g, "");
+  return adAnahtariOrtak(x);
 }
 
 /** Masaüstündeki borc_projeksiyon.odeme_anahtari ile aynı: 'YYYY-AA|kalemanahtari'. */
@@ -1268,17 +1377,36 @@ function telefonEkstresi(op, ekstreler) {
   return e;
 }
 
-/** Bu ayın planlı ödemeleri + telefonda okunan ve son ödemesi bu ay olan ekstreler (aynı adlı planın yerine). */
+/**
+ * Bu ayın planlı ödemeleri + telefonda okunan ve son ödemesi bu ay olan ekstreler. Ekstre projeksiyondaki aynı kartın
+ * planının yerine geçer: adı aynı ya da benzer ('Kuveyt Türk kart' -> 'Kuvety Turk K.K'; masaüstündeki
+ * ekstre.ekstre_plan_adi gibi) ise o satırın adıyla yazılır; projeksiyonda yoksa yeni planlı ödeme olur.
+ */
 export function ekstreliOdemeler(odemeler, ekstreler, simdi) {
-  const out = odemeler.map((o) => ({ ...o }));
+  const out = odemeler.map((o) => ({ ...o, anahtarlar: [o.anahtar] }));
+  for (const o of out) {
+    const e = o.ekstre ? ekstreler.find((x) => x.kaynak === o.ekstre) : null;
+    if (e && ekstreBilgili(e)) {
+      o.pencere = o.pencere || odemePenceresi(e.son_odeme, e.kesim);
+      if (e.anahtar) o.anahtarlar.push(e.anahtar);
+    }
+  }
   for (const e of ekstreler) {
     if (!e.telefonda || !e.planla || !ekstreBilgili(e) || Number(e.borc) <= 0 || e.son_odeme.slice(0, 7) !== simdi) continue;
-    const a = adAnahtari(e.kart);
-    for (let i = out.length - 1; i >= 0; i--) if (adAnahtari(out[i].kalem) === a) out.splice(i, 1);
-    out.push({ kalem: e.kart, kategori: e.kategori, tarih: e.son_odeme, planlanan: Number(e.borc), odenen: 0, kalan: Number(e.borc),
-      anahtar: e.anahtar, kaynak: "Kart ekstresi", durum: "ödenmedi", elle: "", ekstre: e.kaynak });
+    const kat = e.kategori || KART_ODEME_KATEGORISI;
+    const ad = benzerAdBul(e.kart, kat, out.filter((o) => !o.ekstre).map((o) => [o.kalem, o.kategori]));
+    const plan = ad ? out.find((o) => !o.ekstre && o.kalem === ad) : null;
+    const kalem = plan ? plan.kalem : e.kart, kategori = plan ? plan.kategori : kat;
+    const a = adAnahtari(kalem);
+    for (let i = out.length - 1; i >= 0; i--) if (!out[i].ekstre && adAnahtari(out[i].kalem) === a) out.splice(i, 1);
+    const anahtar = odemeAnahtari(kalem, e.son_odeme);
+    out.push({ kalem, kategori, tarih: e.son_odeme, planlanan: Number(e.borc), odenen: 0, kalan: Number(e.borc), anahtar,
+      anahtarlar: [anahtar, e.anahtar], kaynak: "Kart ekstresi", durum: "ödenmedi", elle: plan ? plan.elle || "" : "",
+      ekstre: e.kaynak, pencere: odemePenceresi(e.son_odeme, e.kesim) });
   }
-  return out.sort((x, y) => String(x.tarih).localeCompare(String(y.tarih)) || String(x.kalem).localeCompare(String(y.kalem), "tr"));
+  // telefonda yeniden okunan ekstre masaüstündekinin yerini aldıysa eski satır düşer
+  return out.filter((o) => !o.ekstre || ekstreler.some((e) => e.kaynak === o.ekstre))
+    .sort((x, y) => String(x.tarih).localeCompare(String(y.tarih)) || String(x.kalem).localeCompare(String(y.kalem), "tr"));
 }
 
 function ekstreOdendiMi(e) {
@@ -1287,41 +1415,9 @@ function ekstreOdendiMi(e) {
   return Number(e.borc) <= 0 || e.odenen >= Number(e.borc) * 0.95 - 0.5;
 }
 
-/**
- * Ekstrelerin ödeme durumu. Masaüstünden gelen ekstrede masaüstünün bulduğu ödemeye telefonda girilen ödemeler eklenir;
- * telefonda okunan ekstrede bütün gerçekleşen ödemelere bakılır. Sıra: 'Ödendi' düğmesiyle girilen (ödeme anahtarı),
- * ödeme penceresinde aynı ya da birbirini içeren ad.
- */
-export function ekstreDurumu(ekstreler, hareketler) {
-  const odemeler = hareketler.filter((h) => h.tur === "gider" && !h.plan && Number(h.tutar) > 0)
-    .sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
-  const kullanildi = new Set();
-  const out = ekstreler.map((e) => ({ ...e, eslesen: [...(e.eslesen || [])], odenen: e.telefonda ? 0 : Number(e.odenen || 0) }));
-  const ekle = (e, h) => {
-    kullanildi.add(h);
-    e.odenen += Number(h.tutar);
-    e.eslesen.push({ kalem: h.kalem, tutar: Number(h.tutar), tarih: h.tarih, telefonda: !!h.telefonda });
-  };
-  const bilgili = out.filter(ekstreBilgili).sort((a, b) => a.son_odeme.localeCompare(b.son_odeme));
-  for (const e of bilgili) {
-    for (const h of odemeler) if (h.telefonda && h.odeme && h.odeme === e.anahtar && !kullanildi.has(h)) ekle(e, h);
-  }
-  for (const e of bilgili) {
-    const [bas, son] = odemePenceresi(e.son_odeme, e.kesim);
-    const a = adSade(e.kart);
-    for (const h of odemeler) {
-      if (ekstreOdendiMi(e) || kullanildi.has(h) || h.odeme || (!e.telefonda && !h.telefonda)) continue;
-      const t = String(h.tarih).slice(0, 10);
-      if (t < bas || t > son) continue;
-      const b = adSade(h.kalem);
-      if (a && b && (a === b || (a.length >= 4 && b.includes(a)) || (b.length >= 4 && a.includes(b)))) ekle(e, h);
-    }
-  }
-  for (const e of out) {
-    e.odendi = ekstreOdendiMi(e);
-    e.kalan = !ekstreBilgili(e) || e.odendi ? 0 : Math.max(0, Number(e.borc) - e.odenen);
-  }
-  return out;
+/** Ekstrelerin ödeme durumu (bu ayın planlı ödemeleri olmadan; bkz. odemeDurumu). */
+export function ekstreDurumu(ekstreler, hareketler, simdi = buAy()) {
+  return odemeDurumu([], ekstreler, hareketler, simdi).ekstreler;
 }
 
 /** eksik | odendi | gecikti | yakin (son ödemeye 5 gün ya da daha az) | bekliyor */
@@ -1401,6 +1497,11 @@ export function islemEkle(islemler, op) {
   }
   if (op.op === "ay_sonu") {
     const kalan = out.filter((x) => !(x.op === "ay_sonu" && x.ay === op.ay));
+    kalan.push(op);
+    return kalan;
+  }
+  if (op.op === "odeme_isaret") {      // aynı ödemenin önceki işareti düşer
+    const kalan = out.filter((x) => !(x.op === "odeme_isaret" && x.anahtar === op.anahtar && (x.ekstre || null) === (op.ekstre || null)));
     kalan.push(op);
     return kalan;
   }

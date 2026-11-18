@@ -3,6 +3,10 @@
 // satır ve sütunlara ayırma burada yapılır. Dosyalar güvenilmeyen veridir: boyut sınırları vardır, hiçbir içerik
 // çalıştırılmaz (formüllerin yalnızca kayıtlı sonucu okunur, makrolar okunmaz).
 
+import { BANKALAR, adBenzer, bankaAdlari, farkliBanka } from "./adlar.js";
+
+export { BANKALAR };
+
 export const EN_BUYUK_DOSYA = 25 * 1024 * 1024;
 const EN_BUYUK_ACIK = 80 * 1024 * 1024;      // sıkıştırılmış dosyanın açılmış hali (zip bombasına karşı)
 const EN_COK_SATIR = 20000;
@@ -1115,29 +1119,6 @@ export function ekstreOzeti(satirlar) {
   return Object.values(oz).some((x) => x !== null) ? oz : null;
 }
 
-export const BANKALAR = [   // [görünen ad, adlar, kart markaları, kalem adlarında geçebilecek diğer adlar] (sade, sözcük)
-  ["Garanti BBVA", ["garanti bbva", "garanti bankasi", "garanti"], ["bonus card", "bonus kart", "bonus kredi karti"], ["bonus"]],
-  ["Yapı Kredi", ["yapi kredi", "yapikredi", "yapi ve kredi"], ["worldcard", "world card", "world kart"], ["ykb", "world"]],
-  ["Akbank", ["akbank"], ["axess"], ["wings"]],
-  ["İş Bankası", ["is bankasi", "isbank"], ["maximiles", "maximum kart", "maximum card"], ["is bank", "maximum"]],
-  ["Ziraat Bankası", ["ziraat"], ["bankkart"], []],
-  ["Halkbank", ["halkbank", "halk bankasi"], ["paraf"], []],
-  ["VakıfBank", ["vakifbank", "vakif bank", "vakiflar bankasi"], [], ["vakif"]],
-  ["QNB", ["qnb", "finansbank"], ["cardfinans"], ["finans"]],
-  ["DenizBank", ["denizbank"], [], ["deniz"]],
-  ["TEB", ["teb", "turk ekonomi bankasi"], [], []],
-  ["ING", ["ing bank", "ing"], [], []],
-  ["Enpara", ["enpara"], [], []],
-  ["Kuveyt Türk", ["kuveyt turk"], ["saglam kart"], []],
-  ["Türkiye Finans", ["turkiye finans"], ["happy card"], []],
-  ["Şekerbank", ["sekerbank"], [], []],
-  ["Odeabank", ["odeabank"], [], []],
-  ["Fibabanka", ["fibabanka"], [], []],
-  ["HSBC", ["hsbc"], ["advantage kart", "advantage card"], ["advantage"]],
-  ["Albaraka", ["albaraka"], [], []],
-  ["Burgan Bank", ["burgan"], [], []],
-];
-
 function sozcukMetni(x) {
   return ` ${sade(x).replace(/[^a-z0-9]+/g, " ").trim()} `;
 }
@@ -1161,14 +1142,16 @@ export function bankaBul(metin, ad = "") {
   return en;
 }
 
-/** Bankaya uyan kart ödemesi kalemi (ör. 'Garanti B. K.K'); adaylar tercih sırasıyla. Uyan yoksa null. */
+/** Bankaya uyan kart ödemesi kalemi (ör. 'Garanti B. K.K'); adaylar tercih sırasıyla. Banka adı geçen aday (harf hatalı
+ * olsa da: 'Kuvety Turk K.K') yalnızca kart markası geçenden önce gelir. Uyan yoksa null. */
 export function kartOner(banka, adaylar) {
   const b = BANKALAR.find((x) => x[0] === banka);
   if (!b) return null;
   let en = null, enPuan = 0;
   for (const k of adaylar || []) {
     const m = sozcukMetni(k);
-    const puan = b[1].some((a) => sozcukSay(m, a)) ? 2 : [...b[2], ...b[3]].some((a) => sozcukSay(m, a)) ? 1 : 0;
+    const marka = [...b[2], ...b[3]].some((a) => sozcukSay(m, a));
+    const puan = b[1].some((a) => sozcukSay(m, a)) || (!marka && bankaAdlari(k).has(b[0])) ? 2 : marka ? 1 : 0;
     if (puan > enPuan) {
       en = k;
       enPuan = puan;
@@ -1376,7 +1359,7 @@ function ogrenilmis(hareketler) {
  * Önizleme satırları: her biri {tarih, ay, tur, kategori, kalem, tutar, plan, sec, not, mukerrer}.
  * mevcut: telefondaki hareketler (mükerrer kontrolü ve öğrenilmiş kategoriler için).
  */
-export function onizleme(ham, kart, mevcut = [], kurallar = null, bugun = null) {
+export function onizleme(ham, kart, mevcut = [], kurallar = null, bugun = null, odemeler = []) {
   const bg = bugun || new Date().toISOString().slice(0, 10);
   const ogren = ogrenilmis(mevcut);
   // kart ekstresinde harcamaların işareti çoğunluktur; ters işaretliler ödeme/iade olabilir
@@ -1410,7 +1393,40 @@ export function onizleme(ham, kart, mevcut = [], kurallar = null, bugun = null) 
     return r;
   });
   mukerrerIsaretle(out, mevcut);
+  if (!kart) planliOdemeEsle(out, odemeler);
   return out;
+}
+
+/**
+ * Hesap dökümündeki bir gider henüz ödenmemiş bir planlı ödemenin (projeksiyondaki kalem ya da kart ekstresi)
+ * karşılığıysa satıra yazılır ve kategorisi planınkine çevrilir; böylece eklendiğinde telefonda ve masaüstünde o ödemeye
+ * sayılır, ayrı bir ödeme gibi görünmez. Eşleşme: ad aynı / benzer > ortak sözcük > aynı banka > aynı kategoride tutar
+ * ±%3. Planlı karşılığı olmayan gider yeni hareket olarak eklenir.
+ * odemeler: [{kalem, kategori, planlanan, kalan, anahtar, tarih, pencere}]
+ */
+export function planliOdemeEsle(satirlar, odemeler) {
+  const acik = (odemeler || []).filter((o) => Number(o.kalan) > 0).map((o) => ({ ...o, kalan: Number(o.kalan) }));
+  for (const s of satirlar) {
+    if (s.tur !== "gider" || !s.sec || s.mukerrer) continue;
+    let en = null, enPuan = 9;
+    for (const o of acik) {
+      if (o.kalan <= 0.5) continue;
+      if (o.pencere ? s.tarih < o.pencere[0] || s.tarih > o.pencere[1] : s.ay !== String(o.tarih).slice(0, 7)) continue;
+      const b = adBenzer(o.kalem, s.kalem);
+      const tutar = !farkliBanka(o.kalem, s.kalem) && [o.kalan, Number(o.planlanan)].some((x) => x > 0 && Math.abs(s.tutar - x) <= 0.03 * x);
+      const puan = b === "ad" || b === "icerir" ? 0 : b === "sozcuk" ? 1 : b === "banka" ? 2 : tutar && o.kategori === s.kategori ? 3 : 9;
+      if (puan < enPuan) {
+        en = o;
+        enPuan = puan;
+      }
+    }
+    if (!en) continue;
+    s.kategori = en.kategori;
+    s.planli = { kalem: en.kalem, anahtar: en.anahtar || "" };
+    s.not = `Planlı ödeme: ${en.kalem}${en.tarih ? ` (${tarihTr(String(en.tarih).slice(0, 10))})` : ""}; bu ödemeye sayılır.`;
+    en.kalan -= s.tutar;
+  }
+  return satirlar;
 }
 
 /** Zaten kayıtlı olabilecek satırları işaretler (seçimden çıkarır): aynı hareket daha önce içe aktarılmış ya da
