@@ -1000,26 +1000,64 @@ export function kartMi(metin, ad, satirlar, bakiyeVar) {
 }
 
 // ------------------------------------------------------------------------------------------ kategori tahmini
-export const VARSAYILAN_KURALLAR = {   // masaüstündeki categories.py ile aynı; paket kendi kurallarını taşır
+export const VARSAYILAN_KURALLAR = {   // masaüstündeki categories.kurallar() ile aynı (test denetler); paket kendi kurallarını taşır
   gider: [
-    [["okul", "online ders", "kurs", "kreş", "üniversite", "dershane"], "Eğitim"],
-    [["spor", "hapkido", "cimnastik", "yüzme", "futbol", "bale"], "Çocuk aktiviteleri"],
-    [["terapi", "psikolog", "pisikolog", "doktor", "hastane", "eczane", "diş"], "Sağlık ve terapi"],
-    [["k.k", "kredi kart", "card", "bonus", "miles", "troy", "world", "axess", "maximum", "paraf", "kk ödeme", "kk odeme",
-      "kart ödeme", "kart odeme"], "Kredi kartı ödemeleri"],
+    [["mali müşavir", "mali musavir", "mali müş", "müşavir", "musavir", "muhasebe", "smmm",
+      "defter tutma"], "Mali müşavir ve muhasebe"],
+    [["avukat", "hukuk", "noter", "arabulucu"], "Hukuk ve noter"],
+    [["kart aidat", "kartı aidat", "kart ücreti", "kartı ücreti", "hesap işletim", "işletim ücret", "komisyon",
+      "eft ücret", "havale ücret", "fast ücret", "banka masraf"], "Banka masraf ve komisyonları"],
+    [["muhsgk", "muhtasar", "kdv", "geçici vergi", "gelir vergisi", "damga vergisi", "emlak vergisi", "mtv", "vergi",
+      "beyanname"], "Vergiler"],
+    [["sgk", "bağ-kur", "bağkur", "ssk", "sosyal güvenlik"], "SGK ve Bağ-Kur primleri"],
+    [["kasko", "sigorta", "dask", "poliçe"], "Sigortalar"],
+    [["okul", "okulu", "üniversite", "kreş", "anaokul", "kolej", "eğitim ücret"], "Okul ücretleri"],
+    [["spor salon", "fitness", "gym", "pilates", "yoga", "macfit"], "Spor ve fitness"],
+    [["spor", "hapkido", "cimnastik", "jimnastik", "yüzme", "futbol", "basketbol", "voleybol", "bale", "dans",
+      "satranç", "izci"], "Çocuk aktiviteleri"],
+    [["kurs", "kursu", "özel ders", "online ders", "dershane", "etüt", "ders ücret"], "Kurs ve özel ders"],
+    [["terapi", "psikolog", "pisikolog", "psikiyatr", "pedagog"], "Terapi ve psikolojik destek"],
+    [["veteriner", "mama", "petshop", "pet shop"], "Evcil hayvan"],
+    [["eczane", "ilaç", "ilacı"], "İlaç ve eczane"],
+    [["doktor", "hastane", "klinik", "diş hekim", "dişçi", "diş tedavi", "diş klinik", "ortodont", "implant",
+      "tahlil", "laboratuvar", "göz", "gözlük", "optik", "sağlık"], "Doktor ve hastane"],
+    [["k.k", "kredi kart", "card", "bonus", "miles", "troy", "world", "axess", "maximum", "paraf", "kk ödeme",
+      "kart ödeme"], "Kredi kartı ödemeleri"],
     [["borç kapatma", "boç kapatma", "borç ödeme", "elden borç"], "Kişisel borç ödemesi"],
     [["kredi", "avans", "kmh", "taksit", "enpara", "yapılandırma"], "Kredi taksitleri"],
-    [["aidat", "yardımcı", "temizlik", "site"], "Konut (aidat, bakım, yardımcı)"],
-    [["kira"], "Kira"],
-    [["elektrik", "doğalgaz", "dogalgaz", "su faturası", "internet", "telefon", "fatura", "gsm"], "Faturalar"],
-    [["market", "migros", "a101", "bim", "şok", "carrefour", "manav", "kasap", "gıda"], "Market ve gıda"],
-    [["araba", "araç", "benzin", "yakıt", "otopark", "hgs", "triger", "lastik", "servis bakım"], "Ulaşım ve araç"],
-    [["sigorta", "vergi", "harç", "mtv", "ceza"], "Sigorta, vergi, resmi"],
-    [["parke", "seramik", "tezgah", "çelik", "bahçe", "kamera", "osb", "jcb", "ardiye", "inşaat", "tadilat", "boya", "çit",
-      "duvar", "plaka", "malzeme"], "Ev yapım ve tadilat"],
-    [["nakit"], "Nakit harcamalar"],
-    [["restoran", "sinema", "tatil", "otel", "giyim", "abonelik", "netflix", "spotify"], "Eğlence ve kişisel"],
+    [["harç", "harcı", "ceza", "cezası", "tapu"], "Harç ve cezalar"],
+    [["yardımcı", "temizlik", "bakıcı", "dadı", "ütü"], "Ev yardımcısı ve temizlik"],
+    [["aidat", "site yönetim", "yönetim gider", "apartman"], "Aidat ve site giderleri"],
+    [["kira", "kirası"], "Kira"],
+    [["tamir", "tesisat", "elektrikçi", "kombi", "çilingir", "onarım", "boya badana"], "Ev bakım ve onarım"],
+    [["parke", "seramik", "tezgah", "çelik", "bahçe", "kamera", "osb", "jcb", "ardiye", "inşaat", "tadilat", "boya",
+      "çit", "duvar", "plaka", "malzeme", "yapı market", "koçtaş"], "Ev yapım ve tadilat"],
+    [["mobilya", "beyaz eşya", "ikea", "halı", "perde", "ev eşya"], "Ev eşyası ve mobilya"],
+    [["internet", "telefon", "gsm", "turkcell", "vodafone", "türk telekom", "superonline", "turknet",
+      "fiber"], "İnternet ve telefon"],
+    [["elektrik", "doğalgaz", "su fatura", "iski", "aski", "igdaş", "başkentgaz", "enerjisa",
+      "fatura"], "Elektrik, su, doğalgaz"],
+    [["abonelik", "netflix", "spotify", "youtube", "disney", "amazon prime", "icloud", "google one", "blutv", "exxen",
+      "digiturk"], "Dijital abonelikler"],
+    [["market", "migros", "a101", "bim", "şok", "carrefour", "manav", "kasap", "gıda", "fırın",
+      "macrocenter"], "Market ve gıda"],
+    [["restoran", "restaurant", "kafe", "cafe", "kahve", "starbucks", "yemeksepeti", "lokanta", "pizza", "burger",
+      "döner", "yemek"], "Restoran ve kafe"],
+    [["akaryakıt", "benzin", "yakıt", "motorin", "mazot", "opet", "shell", "petrol ofisi", "aytemiz"], "Akaryakıt"],
+    [["otopark", "hgs", "ogs", "köprü", "otoyol", "ispark"], "Otopark, köprü, otoyol"],
+    [["taksi", "uber", "bitaksi", "istanbulkart", "ankarakart", "metro", "otobüs", "marmaray", "dolmuş",
+      "vapur"], "Toplu taşıma ve taksi"],
+    [["araba", "araç", "triger", "lastik", "servis bakım", "oto yıkama", "tüvtürk",
+      "yağ değişim"], "Araç bakım ve servis"],
+    [["tatil", "otel", "uçak", "thy", "pegasus", "seyahat", "booking", "airbnb", "pansiyon"], "Tatil ve seyahat"],
+    [["sinema", "tiyatro", "konser", "biletix", "passo", "oyun", "steam", "playstation", "hobi",
+      "müze"], "Eğlence ve hobi"],
+    [["giyim", "ayakkabı", "lcw", "koton", "zara", "defacto", "boyner", "kıyafet"], "Giyim ve ayakkabı"],
+    [["kuaför", "berber", "kozmetik", "gratis", "watsons", "rossmann", "parfüm", "manikür"], "Kişisel bakım"],
+    [["kırtasiye", "kitap", "kitapyurdu", "defter"], "Kırtasiye ve kitap"],
+    [["hediye", "bağış", "düğün", "doğum günü"], "Hediye ve bağış"],
     [["yatırım", "altın alım", "hisse alım", "fon alım", "birikim"], "Yatırıma aktarılan"],
+    [["nakit", "atm", "para çekme"], "Nakit harcamalar"],
   ],
   gelir: [
     [["maaş", "maas", "ücret", "ucret", "salary", "payroll"], "Maaş"],
@@ -1028,10 +1066,14 @@ export const VARSAYILAN_KURALLAR = {   // masaüstündeki categories.py ile ayn�
     [["prim", "ikramiye", "bonus ödeme"], "Prim / ikramiye"],
     [["faiz", "temettü", "temettu", "getiri", "kar payı", "kâr payı", "fon satış", "fon satis"], "Yatırım geliri"],
   ],
-  bankalar: ["akbank", "denizbank", "enpara", "fibabanka", "garanti", "halkbank", "ing", "iş bankası", "işbank", "kuveyt türk",
-    "odeabank", "qnb", "teb", "vakıfbank", "yapı kredi", "yapıkredi", "ziraat"],
-  aktarim: ["virman", "hesaplar arası", "hesaplar arasi", "kendi hesab", "hesabıma", "hesabima", "kendi adına",
-    "vadeliye aktarım", "vadesize aktarım", "birikim hesab"],
+  bankalar: [
+    "akbank", "denizbank", "enpara", "fibabanka", "garanti", "halkbank", "ing", "iş bankası", "işbank",
+    "kuveyt türk", "odeabank", "qnb", "teb", "vakıfbank", "yapı kredi", "yapıkredi", "ziraat"
+  ],
+  aktarim: [
+    "virman", "hesaplar arası", "hesaplar arasi", "kendi hesab", "hesabıma", "hesabima", "kendi adına",
+    "vadeliye aktarım", "vadesize aktarım", "birikim hesab"
+  ],
   kart_atla: ["ödeme", "odeme", "payment", "iade", "tahsilat"],
 };
 
@@ -1064,9 +1106,31 @@ export function taksitsiz(aciklama) {
   return sade(aciklama).replace(/\b\d{1,2}\s*\/\s*\d{1,2}\b/g, " ").replace(/\btaksit\w*/g, " ").replace(/\s+/g, " ").trim();
 }
 
+/** Kullanıcı kuralı anahtarı (masaüstündeki categories.kalem_anahtari ile aynı): harf farkı, işaretler, taksit bilgisi
+ *  ve tek başına sayılar yok sayılır: 'TEKNOSA 4521 2/6 TAKSİT' -> 'teknosa'. */
+export function kalemAnahtari(kalem) {
+  return taksitsiz(kalem).replace(/[^a-z0-9]+/g, " ").split(" ").filter((w) => w && !/^\d+$/.test(w)).join(" ");
+}
+
+/** Masaüstünde "Kategoriyi değiştir" ile verilmiş karar (kurallar.ozel), yoksa null. */
+export function kuralKategori(kalem, kurallar = null) {
+  const oz = kurallar && kurallar.ozel;
+  if (!oz) return null;
+  const a = kalemAnahtari(kalem);
+  return (a && Object.prototype.hasOwnProperty.call(oz, a) && oz[a]) || null;
+}
+
+/** v0.11 ve öncesinin bölünen kategorileri: geçmişten öğrenilirken yeni önerilmezler. */
+export const ESKI_KATEGORILER = new Set(["Konut (aidat, bakım, yardımcı)", "Faturalar", "Eğitim", "Sağlık ve terapi",
+  "Ulaşım ve araç", "Sigorta, vergi, resmi", "Eğlence ve kişisel"]);
+
 export function kategoriTahmin(kalem, tur = "gider", kurallar = null) {
   const h = hazirKurallar(kurallar);
   const m = sade(kalem);
+  if (tur !== "gelir") {
+    const k = kuralKategori(kalem, kurallar);
+    if (k) return k;
+  }
   if (tur === "gelir") {
     for (const [es, c] of h.gelir) if (es.some((f) => f(m))) return c;
     return "Diğer gelir";
@@ -1115,7 +1179,7 @@ function ogrenilmis(hareketler) {
     const tur = h.tur === "kart_detay" ? "gider" : h.tur;
     if (tur !== "gider" && tur !== "gelir") continue;
     const n = sade(taksitsiz(h.kalem));
-    if (!n) continue;
+    if (!n || ESKI_KATEGORILER.has(h.kategori)) continue;
     ad.set(`${tur}|${n}`, h.kategori);
     const w = n.split(" ")[0];
     if (w && w.length >= 4 && !/^\d+$/.test(w)) {
@@ -1147,7 +1211,7 @@ export function onizleme(ham, kart, mevcut = [], kurallar = null, bugun = null) 
     if (kart) {
       r.tur = "kart_detay";
       const temiz = taksitsiz(kalem);
-      r.kategori = ogren("gider", kalem) || kategoriTahmin(temiz, "gider", kurallar);
+      r.kategori = kuralKategori(kalem, kurallar) || ogren("gider", kalem) || kategoriTahmin(temiz, "gider", kurallar);
       if (kartAtlaMi(kalem, kurallar) || (s.tutar < 0) !== harcamaEksi) {
         r.sec = false;
         r.not = "Ödeme ya da iade olabilir: harcama değil.";
@@ -1163,7 +1227,7 @@ export function onizleme(ham, kart, mevcut = [], kurallar = null, bugun = null) 
       r.kategori = kredi ? "Kredi" : ogren("gelir", kalem) || kategoriTahmin(kalem, "gelir", kurallar);
     } else {
       r.tur = "gider";
-      r.kategori = ogren("gider", kalem) || kategoriTahmin(kalem, "gider", kurallar);
+      r.kategori = kuralKategori(kalem, kurallar) || ogren("gider", kalem) || kategoriTahmin(kalem, "gider", kurallar);
     }
     return r;
   });

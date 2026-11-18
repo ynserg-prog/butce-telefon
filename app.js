@@ -4,7 +4,7 @@ import { netCubuk, yelpaze } from "./grafik.js";
 import * as depo from "./depo.js";
 import * as E from "./ekstre.js";
 
-export const SURUM = "0.11.0";
+export const SURUM = "0.12.0";
 const UYARI = "Bu uygulamadaki simülasyonlar ve öneriler yatırım tavsiyesi değildir; varsayımlara dayalı hesaplamalardır. "
   + "Kararlarınızı kendi araştırmanıza ve gerekirse lisanslı bir danışmana dayandırın.";
 const SEPET_TURU = { altin: ["altin", "gr"], acil: ["fon", "TL"], konservatif: ["mevduat", "TL"], piyasa: ["hisse", "TL"],
@@ -14,9 +14,35 @@ const AYARLAR = { altin: { "24 ayar (gram, külçe)": 1, "22 ayar (bilezik, hat�
 const SENARYOLAR = [1000, 2000, 5000, 10000, 20000, 50000];
 const EKRANLAR = { ozet: "Özet", hareket: "Hareketler", sim: "Simülasyon", yatirim: "Yatırımlar", varlik: "Varlıklar", veri: "Veri" };
 const TUR_ADI = { gelir: "Gelir", gider: "Gider", kart_detay: "Kart harcaması", borc_girisi: "Borç girişi (yeni kredi)", devir: "Devir" };
-const VARSAYILAN_GIDER = ["Kredi taksitleri", "Kredi kartı ödemeleri", "Kişisel borç ödemesi", "Kira", "Konut (aidat, bakım, yardımcı)",
-  "Faturalar", "Market ve gıda", "Eğitim", "Sağlık ve terapi", "Ulaşım ve araç", "Sigorta, vergi, resmi", "Çocuk aktiviteleri",
-  "Ev yapım ve tadilat", "Nakit harcamalar", "Eğlence ve kişisel", "Yatırıma aktarılan", "Diğer gider"];
+const VARSAYILAN_GIDER = [   // [kategori, bütçe türü, ana grup]: masaüstündeki categories.KATEGORI_AGACI (test denetler)
+  ["Kira", "zorunlu", "Konut"], ["Aidat ve site giderleri", "zorunlu", "Konut"],
+  ["Ev yardımcısı ve temizlik", "zorunlu", "Konut"], ["Ev bakım ve onarım", "zorunlu", "Konut"],
+  ["Ev yapım ve tadilat", "istege_bagli", "Konut"], ["Ev eşyası ve mobilya", "istege_bagli", "Konut"],
+  ["Elektrik, su, doğalgaz", "zorunlu", "Faturalar ve abonelikler"],
+  ["İnternet ve telefon", "zorunlu", "Faturalar ve abonelikler"],
+  ["Dijital abonelikler", "istege_bagli", "Faturalar ve abonelikler"],
+  ["Market ve gıda", "zorunlu", "Gıda"], ["Restoran ve kafe", "istege_bagli", "Gıda"],
+  ["Akaryakıt", "zorunlu", "Ulaşım ve araç"], ["Araç bakım ve servis", "zorunlu", "Ulaşım ve araç"],
+  ["Otopark, köprü, otoyol", "zorunlu", "Ulaşım ve araç"], ["Toplu taşıma ve taksi", "zorunlu", "Ulaşım ve araç"],
+  ["Doktor ve hastane", "zorunlu", "Sağlık"], ["İlaç ve eczane", "zorunlu", "Sağlık"],
+  ["Terapi ve psikolojik destek", "zorunlu", "Sağlık"],
+  ["Okul ücretleri", "zorunlu", "Eğitim ve çocuk"], ["Kurs ve özel ders", "zorunlu", "Eğitim ve çocuk"],
+  ["Kırtasiye ve kitap", "zorunlu", "Eğitim ve çocuk"], ["Çocuk aktiviteleri", "istege_bagli", "Eğitim ve çocuk"],
+  ["Giyim ve ayakkabı", "istege_bagli", "Kişisel ve aile"], ["Kişisel bakım", "istege_bagli", "Kişisel ve aile"],
+  ["Spor ve fitness", "istege_bagli", "Kişisel ve aile"], ["Hediye ve bağış", "istege_bagli", "Kişisel ve aile"],
+  ["Evcil hayvan", "istege_bagli", "Kişisel ve aile"],
+  ["Tatil ve seyahat", "istege_bagli", "Eğlence ve tatil"], ["Eğlence ve hobi", "istege_bagli", "Eğlence ve tatil"],
+  ["Vergiler", "zorunlu", "Vergi, sigorta ve resmi"],
+  ["SGK ve Bağ-Kur primleri", "zorunlu", "Vergi, sigorta ve resmi"],
+  ["Sigortalar", "zorunlu", "Vergi, sigorta ve resmi"], ["Harç ve cezalar", "zorunlu", "Vergi, sigorta ve resmi"],
+  ["Mali müşavir ve muhasebe", "zorunlu", "Profesyonel hizmetler"],
+  ["Hukuk ve noter", "zorunlu", "Profesyonel hizmetler"],
+  ["Banka masraf ve komisyonları", "zorunlu", "Profesyonel hizmetler"],
+  ["Kredi taksitleri", "borc", "Borç ödemeleri"], ["Kredi kartı ödemeleri", "borc", "Borç ödemeleri"],
+  ["Kişisel borç ödemesi", "borc", "Borç ödemeleri"],
+  ["Yatırıma aktarılan", "yatirim", "Birikim ve yatırım"],
+  ["Nakit harcamalar", "istege_bagli", "Diğer"], ["Diğer gider", "istege_bagli", "Diğer"],
+];
 const VARSAYILAN_GELIR = ["Maaş", "Danışmanlık", "Ek gelirler (kira vb.)", "Kira geliri", "Prim / ikramiye", "Yatırım geliri", "Diğer gelir"];
 
 const S = { paket: null, islemler: [], ayar: {}, fiyatElle: {}, ornek: false, sonGonderim: null, ekran: "ozet",
@@ -926,16 +952,45 @@ function varlikFormu(id) {
 }
 
 // ------------------------------------------------------------------------------------------ hareket formu
+/** Gider kategorileri [kategori, bütçe türü, ana grup]. Eski (v0.11) paketlerde ana grup yoktur: o zaman düz liste. */
+function giderAgaci() {
+  const g = S.paket?.kategoriler?.gider;
+  return g && g.length ? g : VARSAYILAN_GIDER;
+}
 function kategoriler(tur) {
   const k = S.paket?.kategoriler;
   if (tur === "gelir") return k?.gelir || VARSAYILAN_GELIR;
   if (tur === "borc_girisi") return ["Kredi", "Avans", "Kişisel borç"];
-  return (k?.gider || []).map((x) => x[0]).concat(k?.gider ? [] : VARSAYILAN_GIDER);
+  return giderAgaci().map((x) => x[0]);
+}
+/** Listede olmayan ama hareketlerde kullanılan gider kategorileri (ör. masaüstünde elle yazılmış). */
+function ozelKategoriler() {
+  const liste = new Set(kategoriler("gider"));
+  const out = new Set();
+  for (const h of D?.hareketler || []) {
+    if ((h.tur === "gider" || h.tur === "kart_detay") && h.kategori && !liste.has(h.kategori)) out.add(h.kategori);
+  }
+  return [...out].sort((a, b) => a.localeCompare(b, "tr"));
 }
 function kategoriSecenekleri(tur, secili) {
-  const liste = kategoriler(tur);
-  const tum = secili && !liste.includes(secili) ? [secili, ...liste] : liste;
-  return tum.map((k) => `<option ${k === secili ? "selected" : ""}>${esc(k)}</option>`).join("");
+  const opt = (k) => `<option ${k === secili ? "selected" : ""}>${esc(k)}</option>`;
+  if (tur === "gelir" || tur === "borc_girisi") {
+    const liste = kategoriler(tur);
+    const tum = secili && !liste.includes(secili) ? [secili, ...liste] : liste;
+    return tum.map(opt).join("");
+  }
+  const agac = giderAgaci();
+  const ozel = ozelKategoriler();
+  if (secili && !agac.some((x) => x[0] === secili) && !ozel.includes(secili)) ozel.unshift(secili);
+  const gruplar = [];
+  for (const [k, , ana] of agac) {
+    const son = gruplar[gruplar.length - 1];
+    if (son && son[0] === (ana || "")) son[1].push(k);
+    else gruplar.push([ana || "", [k]]);
+  }
+  if (ozel.length) gruplar.push(["Özel kategoriler", ozel]);
+  return gruplar.map(([ana, ks]) => (ana ? `<optgroup label="${esc(ana)}">${ks.map(opt).join("")}</optgroup>`
+    : ks.map(opt).join(""))).join("");
 }
 
 /** h: düzenlenecek hareket (yoksa yeni); on: yeni hareket için hazır değerler (ör. planlı ödemeden). */
@@ -970,7 +1025,9 @@ function hareketFormu(h = null, on = {}) {
     if (katElle) return;
     const t = tur === "kart_detay" ? "gider" : tur;
     const ayni = D.hareketler.find((x) => x.kalem === f.kalem.value.trim() && (x.tur === tur || (t === "gider" && x.tur === "gider")));
-    const k = ayni ? ayni.kategori : tur === "borc_girisi" ? "Kredi" : E.kategoriTahmin(E.taksitsiz(f.kalem.value), t, S.paket.kurallar);
+    const kural = t === "gider" ? E.kuralKategori(f.kalem.value, S.paket.kurallar) : null;
+    const k = kural || (ayni && !E.ESKI_KATEGORILER.has(ayni.kategori) ? ayni.kategori : tur === "borc_girisi" ? "Kredi"
+      : E.kategoriTahmin(E.taksitsiz(f.kalem.value), t, S.paket.kurallar));
     f.kategori.innerHTML = kategoriSecenekleri(tur, k);
   };
   d.querySelectorAll("[data-tur]").forEach((b) => b.addEventListener("click", () => {
